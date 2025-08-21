@@ -15,7 +15,7 @@ class GameWindow < Gosu::Window
     @camera_y = 0
     
     # ワールドサイズ
-    @world_width = 2400
+    @world_width = 10000
     @world_height = 600
     
     # プレイヤーのサイズ
@@ -23,6 +23,13 @@ class GameWindow < Gosu::Window
     @player_y = 400
     @player_width = 32
     @player_height = 48
+    
+    # 自動スクロール設定
+    @auto_scroll_speed = 2.0
+    @auto_scroll_enabled = true
+    @max_scroll_speed = 6.0
+    @scroll_acceleration = 0.02
+    @scroll_direction = 1 
     
     # プレイヤー移動
     @player_speed = 5
@@ -39,19 +46,17 @@ class GameWindow < Gosu::Window
     # 地面の高さ
     @ground_y = 500
     
-    # プラットフォームの定義
-    @platforms = [
-      { x: 300, y: 450, width: 100, height: 20 },
-      { x: 500, y: 400, width: 120, height: 20 },
-      { x: 700, y: 350, width: 80, height: 20 },
-      { x: 900, y: 300, width: 100, height: 20 },
-      { x: 1100, y: 250, width: 150, height: 20 },
-      { x: 1350, y: 320, width: 100, height: 20 },
-      { x: 1550, y: 400, width: 120, height: 20 },
-      { x: 1750, y: 200, width: 100, height: 20 },
-      { x: 1950, y: 350, width: 200, height: 20 },
-      { x: 2200, y: 450, width: 150, height: 20 }
-    ]
+    # 動的プラットフォーム生成
+    @platforms = []
+    @platform_generator_x = 800
+    generate_initial_platforms
+    
+    # コイン
+    @coins = []
+    @coins_collected = 0
+    @coins_needed = 10
+    @coin_generator_x = 400
+    generate_initial_coins
     
     # 色
     @player_color = Gosu::Color::BLUE
@@ -59,8 +64,15 @@ class GameWindow < Gosu::Window
     @platform_color = Gosu::Color::GRAY
     @bg_color = Gosu::Color::BLACK
     
-    # Joy-Con接続状態表示用
+    # Joy-Con接続状態
     @font = Gosu::Font.new(20)
+    
+    # ゲーム状態
+    @score = 0
+    @distance = 0
+    @game_over = false
+    @game_clear = false
+    @pause = false
   end
   
   def initialize_joycon
@@ -82,11 +94,16 @@ class GameWindow < Gosu::Window
   end
   
   def update
+    return if @game_over || @game_clear || @pause
+    
     handle_input
     handle_joycon_input
     
-    # ジャンプクールダウン
+    # クールダウン
     @jump_cooldown = [@jump_cooldown - 1, 0].max
+    
+    # 自動スクロール
+    update_auto_scroll
     
     # 重力
     @player_vel_y += @gravity
@@ -98,9 +115,182 @@ class GameWindow < Gosu::Window
     # カメラの更新
     update_camera
     
-    # ワールド境界
-    @player_x = [@player_x, 0].max
-    @player_x = [@player_x, @world_width - @player_width].min
+    # プラットフォーム生成
+    manage_platforms
+    
+    # コイン
+    manage_coins
+    
+    # コイン収集判定
+    collect_coins
+    
+    # スコア更新
+    update_score
+    
+    # ゲームオーバー・クリア判定
+    check_game_over
+    check_game_clear
+  end
+  
+  def update_auto_scroll
+    return unless @auto_scroll_enabled
+    
+    # スクロール速度を徐々に上げる
+    if @auto_scroll_speed < @max_scroll_speed
+      @auto_scroll_speed += @scroll_acceleration
+    end
+    
+    # プレイヤーを自動的に移動させる
+    @player_x += @auto_scroll_speed * @scroll_direction
+    @distance += @auto_scroll_speed
+    
+    # 画面端で反転
+    if @scroll_direction == 1 && @player_x >= @world_width - @player_width - 100
+      @scroll_direction = -1
+      puts "左向きスクロールに切り替え"
+    elsif @scroll_direction == -1 && @player_x <= 100
+      @scroll_direction = 1
+      puts "右向きスクロールに切り替え"
+    end
+    
+    # プレイヤーが画面端に近づいたら強制的に移動
+    if @scroll_direction == 1
+      min_x = @camera_x + 50
+      if @player_x < min_x
+        @player_x = min_x
+      end
+    else
+      max_x = @camera_x + width - 50 - @player_width
+      if @player_x > max_x
+        @player_x = max_x
+      end
+    end
+  end
+  
+  def generate_initial_platforms
+    # 初期プラットフォームを生成
+    x = 300
+    while x < @platform_generator_x
+      generate_platform_at(x)
+      x += rand(150..300)
+    end
+  end
+  
+  def generate_platform_at(x)
+    # ランダムなプラットフォームを生成
+    platform = {
+      x: x,
+      y: rand(200..450),
+      width: rand(80..150),
+      height: 20,
+      type: [:normal, :moving, :breakable].sample
+    }
+    
+    # 移動プラットフォームの場合
+    if platform[:type] == :moving
+      platform[:move_speed] = rand(1..3)
+      platform[:move_direction] = [-1, 1].sample
+      platform[:move_range] = rand(100..200)
+      platform[:start_y] = platform[:y]
+    end
+    
+    @platforms << platform
+  end
+  
+  def manage_platforms
+    # 古いプラットフォームを削除
+    @platforms.reject! { |p| p[:x] + p[:width] < @camera_x - 100 }
+    
+    # 新しいプラットフォームを生成
+    while @platform_generator_x < @camera_x + width + 500
+      generate_platform_at(@platform_generator_x)
+      @platform_generator_x += rand(150..300)
+    end
+    
+    # 移動プラットフォームの更新
+    @platforms.each do |platform|
+      if platform[:type] == :moving
+        platform[:y] += platform[:move_speed] * platform[:move_direction]
+        
+        if (platform[:y] - platform[:start_y]).abs > platform[:move_range]
+          platform[:move_direction] *= -1
+        end
+        
+        platform[:y] = [platform[:y], 100].max
+        platform[:y] = [platform[:y], @ground_y - 50].min
+      end
+    end
+  end
+  
+  def generate_initial_coins
+    # 初期コインを生成
+    x = 400
+    while x < @world_width - 400
+      generate_coin_at(x + rand(-50..50), rand(150..400))
+      x += rand(300..500)
+    end
+  end
+  
+  def generate_coin_at(x, y)
+    @coins << {
+      x: x,
+      y: y,
+      width: 20,
+      height: 20,
+      animation: 0
+    }
+  end
+  
+  def manage_coins
+    # アニメーション更新
+    @coins.each do |coin|
+      coin[:animation] += 1
+    end
+  end
+  
+  def collect_coins
+    @coins.each do |coin|
+      if collision_with_coin?(coin)
+        @coins.delete(coin)
+        @coins_collected += 1
+        puts "コイン取得！ (#{@coins_collected}/#{@coins_needed})"
+      end
+    end
+  end
+  
+  def collision_with_coin?(coin)
+    @player_x < coin[:x] + coin[:width] &&
+    @player_x + @player_width > coin[:x] &&
+    @player_y < coin[:y] + coin[:height] &&
+    @player_y + @player_height > coin[:y]
+  end
+  
+  def check_game_clear
+    if @coins_collected >= @coins_needed
+      @game_clear = true
+      puts "ゲームクリア！"
+    end
+  end
+  
+  def update_score
+    @score = (@distance / 10).to_i
+  end
+  
+  def check_game_over
+    # 画面下に落ちた場合
+    if @player_y > @world_height + 100
+      @game_over = true
+    end
+    
+    # 画面左端に押し出された場合（右向きスクロール時のみ）
+    if @scroll_direction == 1 && @player_x + @player_width < @camera_x
+      @game_over = true
+    end
+    
+    # 画面右端に押し出された場合（左向きスクロール時のみ）
+    if @scroll_direction == -1 && @player_x > @camera_x + width
+      @game_over = true
+    end
   end
   
   def handle_joycon_input
@@ -131,17 +321,52 @@ class GameWindow < Gosu::Window
   end
   
   def draw
+    if @game_over
+      draw_game_over
+      return
+    end
+    
+    if @game_clear
+      draw_game_clear
+      return
+    end
+    
+    if @pause
+      draw_pause
+      return
+    end
+    
     # カメラ
     translate(-@camera_x, -@camera_y) do
-      # 背景を描画
-      Gosu.draw_rect(-100, 0, @world_width + 200, @world_height, @bg_color)
+      # 背景を描画（パララックス効果）
+      draw_parallax_background
       
       # 地面描画
-      Gosu.draw_rect(0, @ground_y, @world_width, @world_height - @ground_y, @ground_color)
+      Gosu.draw_rect(@camera_x - 100, @ground_y, width + 200, @world_height - @ground_y, @ground_color)
       
       # プラットフォーム描画
       @platforms.each do |platform|
-        Gosu.draw_rect(platform[:x], platform[:y], platform[:width], platform[:height], @platform_color)
+        color = case platform[:type]
+                when :moving then Gosu::Color::CYAN
+                when :breakable then Gosu::Color::RED
+                else @platform_color
+                end
+        
+        Gosu.draw_rect(platform[:x], platform[:y], platform[:width], platform[:height], color)
+      end
+      
+      # コイン描画
+      @coins.each do |coin|
+        # アニメーション効果（回転）
+        color_intensity = 150 + (Math.sin(coin[:animation] * 0.2) * 50).to_i
+        coin_color = Gosu::Color.new(255, 255, color_intensity, 0)
+        Gosu.draw_rect(coin[:x], coin[:y], coin[:width], coin[:height], coin_color)
+        
+        # 光る効果
+        if coin[:animation] % 60 < 30
+          Gosu.draw_rect(coin[:x] - 2, coin[:y] - 2, coin[:width] + 4, coin[:height] + 4, 
+                        Gosu::Color.new(100, 255, 255, 0))
+        end
       end
       
       # プレイヤー描画
@@ -149,34 +374,126 @@ class GameWindow < Gosu::Window
     end
     
     # UI表示
+    draw_ui
+  end
+  
+  def draw_parallax_background
+    # 遠景
+    star_offset = (@camera_x * 0.1).to_i
+    20.times do |i|
+      x = (i * 100 - star_offset) % (width + 200) + @camera_x - 100
+      y = (i * 37) % (height - 100) + 50
+      Gosu.draw_rect(x, y, 2, 2, Gosu::Color::WHITE)
+    end
+  end
+  
+  def draw_ui
+    # コイン収集状況
+    @font.draw_text("コイン: #{@coins_collected}/#{@coins_needed}", 10, 10, 1, 1, 1, Gosu::Color::YELLOW)
+    @font.draw_text("スコア: #{@score}", 10, 35, 1, 1, 1, Gosu::Color::WHITE)
+    @font.draw_text("速度: #{@auto_scroll_speed.round(1)}", 10, 60, 1, 1, 1, Gosu::Color::WHITE)
+    
+    # スクロール方向表示
+    direction_text = @scroll_direction == 1 ? "→" : "←"
+    @font.draw_text("方向: #{direction_text}", 10, 85, 1, 1, 1, Gosu::Color::CYAN)
+    
+    # Joy-Con状態
     status_text = @joycon_connected ? "Joy-Con: 接続中" : "Joy-Con: 未接続"
     status_color = @joycon_connected ? Gosu::Color::GREEN : Gosu::Color::RED
-    @font.draw_text(status_text, 10, 10, 1, 1, 1, status_color)
+    @font.draw_text(status_text, 10, 110, 1, 1, 1, status_color)
     
-    @font.draw_text("操作: ←→キーで移動、Joy-Conを振ってジャンプ", 10, 35, 1, 1, 1, Gosu::Color::WHITE)
+    # 操作説明
+    @font.draw_text("Joy-Conを振ってジャンプ！", 10, 135, 1, 1, 1, Gosu::Color::YELLOW)
+    @font.draw_text("P: ポーズ, R: リスタート", 10, 160, 1, 1, 1, Gosu::Color::WHITE)
     
     # デバッグ情報
     if @joycon_connected
-      accel_text = "Z軸加速度: #{@current_accel_z.round(3)}G (閾値: #{@jump_threshold}G)"
-      @font.draw_text(accel_text, 10, 60, 1, 1, 1, Gosu::Color::YELLOW)
+      accel_text = "Z軸: #{@current_accel_z.round(3)}G"
+      @font.draw_text(accel_text, 10, 185, 1, 1, 1, Gosu::Color::YELLOW)
       
       if @jump_cooldown > 0
-        cooldown_text = "ジャンプクールダウン: #{@jump_cooldown}"
-        @font.draw_text(cooldown_text, 10, 85, 1, 1, 1, Gosu::Color::RED)
+        cooldown_text = "クールダウン: #{@jump_cooldown}"
+        @font.draw_text(cooldown_text, 10, 210, 1, 1, 1, Gosu::Color::RED)
       end
     end
+  end
+  
+  def draw_game_over
+    # ゲームオーバー画面
+    Gosu.draw_rect(0, 0, width, height, Gosu::Color.new(100, 0, 0, 0))
+    
+    game_over_font = Gosu::Font.new(40)
+    game_over_font.draw_text("GAME OVER", width/2 - 120, height/2 - 60, 1, 1, 1, Gosu::Color::RED)
+    
+    @font.draw_text("最終スコア: #{@score}", width/2 - 80, height/2 - 10, 1, 1, 1, Gosu::Color::WHITE)
+    @font.draw_text("Rキーでリスタート", width/2 - 80, height/2 + 20, 1, 1, 1, Gosu::Color::WHITE)
+    @font.draw_text("ESCキーで終了", width/2 - 70, height/2 + 50, 1, 1, 1, Gosu::Color::WHITE)
+  end
+  
+  def draw_game_clear
+    # ゲームクリア画面
+    Gosu.draw_rect(0, 0, width, height, Gosu::Color.new(100, 0, 100, 0))
+    
+    clear_font = Gosu::Font.new(40)
+    clear_font.draw_text("GAME CLEAR!", width/2 - 140, height/2 - 60, 1, 1, 1, Gosu::Color::YELLOW)
+    
+    @font.draw_text("コイン #{@coins_needed}枚収集完了！", width/2 - 100, height/2 - 10, 1, 1, 1, Gosu::Color::WHITE)
+    @font.draw_text("最終スコア: #{@score}", width/2 - 80, height/2 + 20, 1, 1, 1, Gosu::Color::WHITE)
+    @font.draw_text("Rキーでリスタート", width/2 - 80, height/2 + 50, 1, 1, 1, Gosu::Color::WHITE)
+    @font.draw_text("ESCキーで終了", width/2 - 70, height/2 + 80, 1, 1, 1, Gosu::Color::WHITE)
+  end
+  
+  def draw_pause
+    # ポーズ画面
+    Gosu.draw_rect(0, 0, width, height, Gosu::Color.new(100, 0, 0, 0))
+    
+    pause_font = Gosu::Font.new(40)
+    pause_font.draw_text("PAUSE", width/2 - 80, height/2 - 20, 1, 1, 1, Gosu::Color::YELLOW)
+    
+    @font.draw_text("Pキーで再開", width/2 - 60, height/2 + 30, 1, 1, 1, Gosu::Color::WHITE)
+  end
+  
+  def restart_game
+    # ゲームリスタート
+    @camera_x = 0
+    @player_x = 100
+    @player_y = 400
+    @player_vel_y = 0
+    @auto_scroll_speed = 2.0
+    @scroll_direction = 1
+    @score = 0
+    @distance = 0
+    @coins_collected = 0
+    @game_over = false
+    @game_clear = false
+    @pause = false
+    @on_ground = false
+    @platforms.clear
+    @coins.clear
+    @platform_generator_x = 800
+    @coin_generator_x = 400
+    generate_initial_platforms
+    generate_initial_coins
   end
   
   private
   
   def handle_input
-    # 左右移動
+    # 左右微調整
     if Gosu.button_down?(Gosu::KB_LEFT) || Gosu.button_down?(Gosu::KB_A)
-      @player_x -= @player_speed
+      if @scroll_direction == 1
+        @player_x -= @player_speed * 0.5 unless @player_x <= @camera_x + 50
+      else
+        @player_x -= @player_speed * 0.5 unless @player_x <= @camera_x + 50
+      end
     end
     
     if Gosu.button_down?(Gosu::KB_RIGHT) || Gosu.button_down?(Gosu::KB_D)
-      @player_x += @player_speed
+      if @scroll_direction == 1
+        @player_x += @player_speed * 0.5 unless @player_x >= @camera_x + width - 100
+      else
+        @player_x += @player_speed * 0.5 unless @player_x >= @camera_x + width - 100
+      end
     end
   end
   
@@ -186,8 +503,18 @@ class GameWindow < Gosu::Window
       close
     end
     
+    # ポーズ
+    if id == Gosu::KB_P
+      @pause = !@pause
+    end
+    
+    # リスタート
+    if id == Gosu::KB_R
+      restart_game
+    end
+    
     # キーボードでのジャンプ
-    if (id == Gosu::KB_SPACE || id == Gosu::KB_UP || id == Gosu::KB_J) && @on_ground
+    if (id == Gosu::KB_SPACE || id == Gosu::KB_UP || id == Gosu::KB_J) && @on_ground && !@game_over && !@game_clear && !@pause
       @player_vel_y = @jump_power
       @on_ground = false
       puts "キーボードジャンプ"
@@ -211,9 +538,17 @@ class GameWindow < Gosu::Window
           @player_y = platform[:y] - @player_height
           @player_vel_y = 0
           @on_ground = true
+          
+          # 壊れるプラットフォーム
+          if platform[:type] == :breakable
+            platform[:breaking] = true
+          end
         end
       end
     end
+    
+    # 壊れたプラットフォームを削除
+    @platforms.reject! { |p| p[:breaking] }
   end
   
   def collision_with_platform?(platform)
@@ -224,7 +559,8 @@ class GameWindow < Gosu::Window
   end
   
   def update_camera
-    target_camera_x = @player_x - width / 2
+    # 自動スクロールに合わせてカメラを更新
+    target_camera_x = @player_x - width / 3  # プレイヤーを少し左寄りに
     @camera_x += (target_camera_x - @camera_x) * 0.1
     @camera_x = [@camera_x, 0].max
     @camera_x = [@camera_x, @world_width - width].min
