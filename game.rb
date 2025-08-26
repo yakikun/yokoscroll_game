@@ -1,5 +1,6 @@
 require 'gosu'
 require 'hidaping'
+require 'timeout'
 
 class GameWindow < Gosu::Window
   def initialize
@@ -27,7 +28,7 @@ class GameWindow < Gosu::Window
     # 自動スクロール設定
     @auto_scroll_speed = 2.0
     @auto_scroll_enabled = true
-    @max_scroll_speed = 6.0
+    @max_scroll_speed = 6
     @scroll_acceleration = 0.02
     @scroll_direction = 1 
     
@@ -65,7 +66,7 @@ class GameWindow < Gosu::Window
     @bg_color = Gosu::Color::BLACK
     
     # Joy-Con接続状態
-    @font = Gosu::Font.new(20)
+    @font = Gosu::Font.new(20, name: "keifont.ttf")
     
     # ゲーム状態
     @score = 0
@@ -76,6 +77,7 @@ class GameWindow < Gosu::Window
   end
   
   def initialize_joycon
+    
     begin
       @joycon_handle = HIDAPING.open(0x057e, 0x2007)
       if @joycon_handle
@@ -98,7 +100,7 @@ class GameWindow < Gosu::Window
     
     handle_input
     handle_joycon_input
-    
+    handle_joycon_input
     # クールダウン
     @jump_cooldown = [@jump_cooldown - 1, 0].max
     
@@ -297,8 +299,10 @@ class GameWindow < Gosu::Window
     return unless @joycon_connected && @joycon_handle
     
     begin
-      # データを読み取り
-      data = @joycon_handle.read(49)
+      # タイムアウト
+      data = Timeout.timeout(1) do
+        @joycon_handle.read(49)
+      end
       
       return unless data && data.length >= 49 && data[0].ord == 0x30
       
@@ -312,7 +316,7 @@ class GameWindow < Gosu::Window
       if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
         @player_vel_y = @jump_power
         @on_ground = false
-        @jump_cooldown = 30 
+        @jump_cooldown = 30
         puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G"
       end
       
@@ -407,14 +411,10 @@ class GameWindow < Gosu::Window
     @font.draw_text("P: ポーズ, R: リスタート", 10, 160, 1, 1, 1, Gosu::Color::WHITE)
     
     # デバッグ情報
-    if @joycon_connected
-      accel_text = "Z軸: #{@current_accel_z.round(3)}G"
-      @font.draw_text(accel_text, 10, 185, 1, 1, 1, Gosu::Color::YELLOW)
-      
-      if @jump_cooldown > 0
-        cooldown_text = "クールダウン: #{@jump_cooldown}"
-        @font.draw_text(cooldown_text, 10, 210, 1, 1, 1, Gosu::Color::RED)
-      end
+
+    if @jump_cooldown > 0
+      cooldown_text = "クールダウン: #{@jump_cooldown}"
+      @font.draw_text(cooldown_text, 10, 210, 1, 1, 1, Gosu::Color::RED)
     end
   end
   
