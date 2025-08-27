@@ -300,7 +300,7 @@ class GameWindow < Gosu::Window
     
     begin
       # タイムアウト
-      data = Timeout.timeout(1) do
+      data = Timeout.timeout(0.1) do
         @joycon_handle.read(49)
       end
       
