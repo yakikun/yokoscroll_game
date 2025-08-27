@@ -99,8 +99,10 @@ class GameWindow < Gosu::Window
     return if @game_over || @game_clear || @pause
     
     handle_input
-    handle_joycon_input
-    handle_joycon_input
+    Timeout.timeout(1) do
+      handle_joycon_input
+      handle_joycon_input
+    end
     # クールダウン
     @jump_cooldown = [@jump_cooldown - 1, 0].max
     
@@ -132,6 +134,8 @@ class GameWindow < Gosu::Window
     # ゲームオーバー・クリア判定
     check_game_over
     check_game_clear
+
+    sleep(1.0 / 60) # 120FPS制限
   end
   
   def update_auto_scroll
@@ -297,30 +301,29 @@ class GameWindow < Gosu::Window
   
   def handle_joycon_input
     return unless @joycon_connected && @joycon_handle
-    
+
+    data = nil
     begin
-      # タイムアウト
-      data = Timeout.timeout(0.1) do
-        @joycon_handle.read(49)
+      Timeout.timeout(0.3) do
+        data = @joycon_handle.read(49)
       end
-      
-      return unless data && data.length >= 49 && data[0].ord == 0x30
-      
-      # Z軸加速度取得
-      az_raw = (data[18].ord << 8) | data[17].ord
-      az = (az_raw > 32767 ? az_raw - 65536 : az_raw) / 4000.0
-      
-      @current_accel_z = az
-      
-      # ジャンプ検出
-      if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
-        @player_vel_y = @jump_power
-        @on_ground = false
-        @jump_cooldown = 30
-        puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G"
-      end
-      
-    rescue => e
+    rescue
+      return
+    end
+
+    return unless data && data.length >= 49 && data[0].ord == 0x30
+
+    # Z軸加速度取得
+    az_raw = (data[18].ord << 8) | data[17].ord
+    az = (az_raw > 32767 ? az_raw - 65536 : az_raw) / 4000.0
+    @current_accel_z = az
+
+    # ジャンプ検出
+    if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
+      @player_vel_y = @jump_power
+      @on_ground = false
+      @jump_cooldown = 30
+      puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G"
     end
   end
   
