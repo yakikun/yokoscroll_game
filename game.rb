@@ -99,10 +99,7 @@ class GameWindow < Gosu::Window
     return if @game_over || @game_clear || @pause
     
     handle_input
-    Timeout.timeout(1) do
-      handle_joycon_input
-      handle_joycon_input
-    end
+    handle_joycon_input
     # クールダウン
     @jump_cooldown = [@jump_cooldown - 1, 0].max
     
@@ -134,8 +131,6 @@ class GameWindow < Gosu::Window
     # ゲームオーバー・クリア判定
     check_game_over
     check_game_clear
-
-    sleep(1.0 / 60) # 120FPS制限
   end
   
   def update_auto_scroll
@@ -302,14 +297,17 @@ class GameWindow < Gosu::Window
   def handle_joycon_input
     return unless @joycon_connected && @joycon_handle
 
-    data = nil
-    begin
-      Timeout.timeout(0.3) do
-        data = @joycon_handle.read(49)
-      end
-    rescue
-      return
+  data = nil
+  begin
+    if
+      data = @joycon_handle.read(49)
+      data = @joycon_handle.read_timeout(49 , 1)
+    else
+      data = @joycon_handle.read_timeout(49, 1)
     end
+  rescue
+    return
+  end
 
     return unless data && data.length >= 49 && data[0].ord == 0x30
 
