@@ -74,6 +74,9 @@ class GameWindow < Gosu::Window
     @game_over = false
     @game_clear = false
     @pause = false
+
+    # コイン画像
+    @coin_image = Gosu::Image.new("coin.png", retro: true)
   end
   
   def initialize_joycon
@@ -301,9 +304,9 @@ class GameWindow < Gosu::Window
   begin
     if
       data = @joycon_handle.read(49)
-      data = @joycon_handle.read_timeout(49 , 1)
+      data = @joycon_handle.read_timeout(49 , 0.1)
     else
-      data = @joycon_handle.read_timeout(49, 1)
+      data = @joycon_handle.read_timeout(49, 0.1)
     end
   rescue
     return
@@ -362,10 +365,8 @@ class GameWindow < Gosu::Window
       
       # コイン描画
       @coins.each do |coin|
-        # アニメーション効果（回転）
-        color_intensity = 150 + (Math.sin(coin[:animation] * 0.2) * 50).to_i
-        coin_color = Gosu::Color.new(255, 255, color_intensity, 0)
-        Gosu.draw_rect(coin[:x], coin[:y], coin[:width], coin[:height], coin_color)
+        # 画像でコインを描画
+        @coin_image.draw(coin[:x], coin[:y], 1, coin[:width] / @coin_image.width.to_f, coin[:height] / @coin_image.height.to_f)
         
         # 光る効果
         if coin[:animation] % 60 < 30
