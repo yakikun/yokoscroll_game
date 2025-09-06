@@ -66,7 +66,7 @@ class GameWindow < Gosu::Window
     @bg_color = Gosu::Color::BLACK
     
     # Joy-Con接続状態
-    @font = Gosu::Font.new(20, name: "keifont.ttf")
+    @font = Gosu::Font.new(20, name: "font/keifont.ttf")
     
     # ゲーム状態
     @score = 0
@@ -75,10 +75,10 @@ class GameWindow < Gosu::Window
     @game_clear = false
     @pause = false
 
-    # コイン画像
-    @coin_image = Gosu::Image.new("coin.png", retro: true)
-    @block_image = Gosu::Image.new("block.png", retro: true) 
-    @player_image = Gosu::Image.new("kyara.png", retro: true)
+    # 画像
+    @coin_image = Gosu::Image.new("img/coin.png", retro: true)
+    @block_image = Gosu::Image.new("img/block.png", retro: true) 
+    @player_image = Gosu::Image.new("img/kyara.png", retro: true)
   end
   
   def initialize_joycon
@@ -291,8 +291,8 @@ class GameWindow < Gosu::Window
     end
   end
   
-  def handle_joycon_input
-    return unless @joycon_connected && @joycon_handle
+def handle_joycon_input
+  return unless @joycon_connected && @joycon_handle
 
   data = nil
   begin
@@ -306,21 +306,23 @@ class GameWindow < Gosu::Window
     return
   end
 
-    return unless data && data.length >= 49 && data[0].ord == 0x30
+  return unless data && data.length >= 49 && data[0].ord == 0x30
 
-    # Z軸加速度取得
-    az_raw = (data[18].ord << 8) | data[17].ord
-    az = (az_raw > 32767 ? az_raw - 65536 : az_raw) / 4000.0
-    @current_accel_z = az
+  # Z軸加速度取得
+  az_raw = (data[18].ord << 8) | data[17].ord
+  az = (az_raw > 32767 ? az_raw - 65536 : az_raw) / 4000.0
+  @current_accel_z = az
 
-    # ジャンプ検出
-    if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
-      @player_vel_y = @jump_power
-      @on_ground = false
-      @jump_cooldown = 30
-      puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G"
-    end
+  # ジャンプ検出
+  if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
+    # 振りの強さでジャンプ力を変化
+    jump_strength = [[az.abs, -1.0].max, -3.0].min
+    @player_vel_y = @jump_power * jump_strength
+    @on_ground = false
+    @jump_cooldown = 30
+    puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G, ジャンプ力: #{@player_vel_y.round(2)}"
   end
+end
   
   def draw
     if @game_over
