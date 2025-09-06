@@ -77,6 +77,7 @@ class GameWindow < Gosu::Window
 
     # コイン画像
     @coin_image = Gosu::Image.new("coin.png", retro: true)
+    @block_image = Gosu::Image.new("block.png", retro: true) # 30x20画像
   end
   
   def initialize_joycon
@@ -354,13 +355,17 @@ class GameWindow < Gosu::Window
       
       # プラットフォーム描画
       @platforms.each do |platform|
-        color = case platform[:type]
-                when :moving then Gosu::Color::CYAN
-                when :breakable then Gosu::Color::RED
-                else @platform_color
-                end
-        
-        Gosu.draw_rect(platform[:x], platform[:y], platform[:width], platform[:height], color)
+        if @block_image
+          blocks = (platform[:width] / 30.0).ceil
+          blocks.times do |i|
+            x = platform[:x] + i * 30
+            w = [30, platform[:x] + platform[:width] - x].min
+            scale_x = w / 30.0
+            @block_image.draw(x, platform[:y], 1, scale_x, 1)
+          end
+        else
+          Gosu.draw_rect(platform[:x], platform[:y], platform[:width], platform[:height], @platform_color)
+        end
       end
       
       # コイン描画
@@ -448,10 +453,10 @@ class GameWindow < Gosu::Window
   def draw_pause
     # ポーズ画面
     Gosu.draw_rect(0, 0, width, height, Gosu::Color.new(100, 0, 0, 0))
-    
+
     pause_font = Gosu::Font.new(40)
     pause_font.draw_text("PAUSE", width/2 - 80, height/2 - 20, 1, 1, 1, Gosu::Color::YELLOW)
-    
+
     @font.draw_text("Pキーで再開", width/2 - 60, height/2 + 30, 1, 1, 1, Gosu::Color::WHITE)
   end
   
