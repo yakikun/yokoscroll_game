@@ -78,6 +78,7 @@ class GameWindow < Gosu::Window
     # コイン画像
     @coin_image = Gosu::Image.new("coin.png", retro: true)
     @block_image = Gosu::Image.new("block.png", retro: true) # 30x20画像
+    @player_image = Gosu::Image.new("kyara.png", retro: true)
   end
   
   def initialize_joycon
@@ -334,26 +335,25 @@ class GameWindow < Gosu::Window
       draw_game_over
       return
     end
-    
+
     if @game_clear
       draw_game_clear
       return
     end
-    
+
     if @pause
       draw_pause
       return
     end
-    
+
     # カメラ
     translate(-@camera_x, -@camera_y) do
-      # 背景を描画（パララックス効果）
       draw_parallax_background
-      
-      # 地面描画
-      Gosu.draw_rect(@camera_x - 100, @ground_y, width + 200, @world_height - @ground_y, @ground_color)
-      
-      # プラットフォーム描画
+
+      # 地面の描画
+      Gosu.draw_rect(@camera_x, @ground_y, width, @world_height - @ground_y, @ground_color, 0)
+
+      # プラットフォームの描画
       @platforms.each do |platform|
         if @block_image
           blocks = (platform[:width] / 30.0).ceil
@@ -367,23 +367,20 @@ class GameWindow < Gosu::Window
           Gosu.draw_rect(platform[:x], platform[:y], platform[:width], platform[:height], @platform_color)
         end
       end
-      
-      # コイン描画
+
+      # コインの描画
       @coins.each do |coin|
-        # 画像でコインを描画
         @coin_image.draw(coin[:x], coin[:y], 1, coin[:width] / @coin_image.width.to_f, coin[:height] / @coin_image.height.to_f)
-        
-        # 光る効果
-        if coin[:animation] % 60 < 30
-          Gosu.draw_rect(coin[:x] - 2, coin[:y] - 2, coin[:width] + 4, coin[:height] + 4, 
-                        Gosu::Color.new(100, 255, 255, 0))
-        end
       end
-      
+
       # プレイヤー描画
-      Gosu.draw_rect(@player_x, @player_y, @player_width, @player_height, @player_color)
+      if @player_image
+        @player_image.draw(@player_x, @player_y, 1, @player_width / @player_image.width.to_f, @player_height / @player_image.height.to_f)
+      else
+        Gosu.draw_rect(@player_x, @player_y, @player_width, @player_height, @player_color)
+      end
     end
-    
+
     # UI表示
     draw_ui
   end
