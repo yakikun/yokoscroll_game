@@ -1,6 +1,5 @@
 require 'gosu'
 require 'hidaping'
-require 'timeout'
 
 class GameWindow < Gosu::Window
   def initialize
