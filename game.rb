@@ -358,9 +358,15 @@ class GameWindow < Gosu::Window
         if @block_image
           blocks = (platform[:width] / 30.0).ceil
           blocks.times do |i|
+            # 最後のブロックだけ幅を調整
+            if i == blocks - 1
+              w = platform[:width] - 30 * (blocks - 1)
+              scale_x = w / 30.0
+            else
+              w = 30
+              scale_x = 1.0
+            end
             x = platform[:x] + i * 30
-            w = [30, platform[:x] + platform[:width] - x].min
-            scale_x = w / 30.0
             @block_image.draw(x, platform[:y], 1, scale_x, 1)
           end
         else
