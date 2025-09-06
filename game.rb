@@ -77,7 +77,7 @@ class GameWindow < Gosu::Window
 
     # コイン画像
     @coin_image = Gosu::Image.new("coin.png", retro: true)
-    @block_image = Gosu::Image.new("block.png", retro: true) # 30x20画像
+    @block_image = Gosu::Image.new("block.png", retro: true) 
     @player_image = Gosu::Image.new("kyara.png", retro: true)
   end
   
@@ -150,14 +150,6 @@ class GameWindow < Gosu::Window
     @player_x += @auto_scroll_speed * @scroll_direction
     @distance += @auto_scroll_speed
     
-    # 画面端で反転
-    if @scroll_direction == 1 && @player_x >= @world_width - @player_width - 100
-      @scroll_direction = -1
-      puts "左向きスクロールに切り替え"
-    elsif @scroll_direction == -1 && @player_x <= 100
-      @scroll_direction = 1
-      puts "右向きスクロールに切り替え"
-    end
     
     # プレイヤーが画面端に近づいたら強制的に移動
     if @scroll_direction == 1
@@ -233,7 +225,7 @@ class GameWindow < Gosu::Window
     x = 400
     while x < @world_width - 400
       generate_coin_at(x + rand(-50..50), rand(150..400))
-      x += rand(300..500)
+      x += rand(250..415)
     end
   end
   
@@ -287,14 +279,14 @@ class GameWindow < Gosu::Window
     if @player_y > @world_height + 100
       @game_over = true
     end
-    
-    # 画面左端に押し出された場合（右向きスクロール時のみ）
-    if @scroll_direction == 1 && @player_x + @player_width < @camera_x
+
+    # 画面左端に到達した場合
+    if @player_x <= @camera_x
       @game_over = true
     end
-    
-    # 画面右端に押し出された場合（左向きスクロール時のみ）
-    if @scroll_direction == -1 && @player_x > @camera_x + width
+
+    # 画面右端に到達した場合
+    if @player_x + @player_width >= @camera_x + width
       @game_over = true
     end
   end
@@ -570,7 +562,7 @@ class GameWindow < Gosu::Window
   
   def update_camera
     # 自動スクロールに合わせてカメラを更新
-    target_camera_x = @player_x - width / 3  # プレイヤーを少し左寄りに
+    target_camera_x = @player_x - width / 3  
     @camera_x += (target_camera_x - @camera_x) * 0.1
     @camera_x = [@camera_x, 0].max
     @camera_x = [@camera_x, @world_width - width].min
