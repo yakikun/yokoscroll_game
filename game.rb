@@ -1,5 +1,6 @@
 require 'gosu'
 require 'hidaping'
+require 'timeout'
 
 class GameWindow < Gosu::Window
   def initialize
@@ -38,10 +39,12 @@ class GameWindow < Gosu::Window
     @jump_power = -15
     @on_ground = false
     
-    # Joy-Con関連
-    @jump_threshold = 1.0 
-    @jump_cooldown = 0    
-    @current_accel_z = 0.0 
+  # Joy-Con関連
+  @jump_threshold = 1.0 
+  @jump_cooldown = 0    
+  @current_accel_z = 0.0 
+  # 加速度値履歴（グラフ用）
+  @accel_z_history = []
     
     # 地面の高さ
     @ground_y = 500
@@ -74,9 +77,9 @@ class GameWindow < Gosu::Window
     @game_clear = false
     @pause = false
 
-    # 画像
+    # コイン画像
     @coin_image = Gosu::Image.new("img/coin.png", retro: true)
-    @block_image = Gosu::Image.new("img/block.png", retro: true) 
+    @block_image = Gosu::Image.new("img/block.png", retro: true)
     @player_image = Gosu::Image.new("img/kyara.png", retro: true)
   end
   
@@ -290,38 +293,39 @@ class GameWindow < Gosu::Window
     end
   end
   
-def handle_joycon_input
-  return unless @joycon_connected && @joycon_handle
+  def handle_joycon_input
+    return unless @joycon_connected && @joycon_handle
 
   data = nil
   begin
     if
       data = @joycon_handle.read(49)
-      data = @joycon_handle.read_timeout(49 , 0.1)
+      data = @joycon_handle.read_timeout(49 , 0.01)
     else
-      data = @joycon_handle.read_timeout(49, 0.1)
+      data = @joycon_handle.read_timeout(49, 0.01)
     end
   rescue
     return
   end
 
-  return unless data && data.length >= 49 && data[0].ord == 0x30
+    return unless data && data.length >= 49 && data[0].ord == 0x30
 
-  # Z軸加速度取得
-  az_raw = (data[18].ord << 8) | data[17].ord
-  az = (az_raw > 32767 ? az_raw - 65536 : az_raw) / 4000.0
+    # Z軸加速度取得
+    az_raw = (data[18].ord << 8) | data[17].ord
+    az = (az_raw > 32767 ? az_raw - 65536 : az_raw) / 4000.0
+
   @current_accel_z = az
-
-  # ジャンプ検出
-  if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
-    # 振りの強さでジャンプ力を変化
-    jump_strength = [[az.abs, -1.0].max, -3.0].min
-    @player_vel_y = @jump_power * jump_strength
-    @on_ground = false
-    @jump_cooldown = 30
-    puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G, ジャンプ力: #{@player_vel_y.round(2)}"
+  # 加速度値を履歴に追加し、最大100件に制限
+  @accel_z_history << az
+  @accel_z_history.shift if @accel_z_history.size > 100
+    # ジャンプ検出
+    if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
+      @player_vel_y = @jump_power
+      @on_ground = false
+      @jump_cooldown = 30
+      puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G"
+    end
   end
-end
   
   def draw
     if @game_over
@@ -418,6 +422,34 @@ end
     if @jump_cooldown > 0
       cooldown_text = "クールダウン: #{@jump_cooldown}"
       @font.draw_text(cooldown_text, 10, 210, 1, 1, 1, Gosu::Color::RED)
+    end
+
+    # 加速度グラフ描画
+    if @accel_z_history && !@accel_z_history.empty?
+      graph_w = 300
+      graph_h = 100
+      graph_x = width - graph_w - 10
+      graph_y = 10
+      Gosu.draw_rect(graph_x-1, graph_y-1, graph_w+2, graph_h+2, Gosu::Color::GRAY, 10)
+      max_val = 2.0
+      min_val = -2.0
+      scale_x = graph_w.to_f / [@accel_z_history.size-1,1].max
+      scale_y = graph_h.to_f / (max_val - min_val)
+      # 0の基準線
+      zero_y = graph_y + graph_h/2
+      Gosu.draw_line(graph_x, zero_y, Gosu::Color::WHITE, graph_x+graph_w, zero_y, Gosu::Color::WHITE, 12)
+      prev_x = graph_x
+      prev_y = zero_y - (@accel_z_history[0] * scale_y).to_i
+      @accel_z_history.each_with_index do |val, i|
+        x = graph_x + (i * scale_x)
+        y = zero_y - (val * scale_y).to_i
+        if i > 0
+          Gosu.draw_line(prev_x, prev_y, Gosu::Color::CYAN, x, y, Gosu::Color::YELLOW, 11)
+        end
+        prev_x = x
+        prev_y = y
+      end
+      @font.draw_text("加速度Z", graph_x, graph_y-22, 11, 1, 1, Gosu::Color::WHITE)
     end
   end
   
