@@ -307,7 +307,7 @@ class GameWindow < Gosu::Window
   rescue
     return
   end
-
+          # なぜか動作するif文
     return unless data && data.length >= 49 && data[0].ord == 0x30
 
     # Z軸加速度取得

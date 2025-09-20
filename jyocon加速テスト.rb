@@ -16,7 +16,6 @@ begin
 
         csv << [Time.now.strftime("%Y-%m-%d %H:%M:%S.%L"), ay.round(5)]
         puts "Accel Y: #{ay.round(3)}G"
-        sleep 0.01
       end
     end
   else
