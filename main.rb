@@ -36,7 +36,8 @@ class GameWindow < Gosu::Window
     @player_speed = 5
     @player_vel_y = 0
     @gravity = 0.5
-    @jump_power = -15
+    @jump_power_low = -10
+    @jump_power_high = -18 
     @on_ground = false
     
   # Joy-Con関連
@@ -227,7 +228,7 @@ class GameWindow < Gosu::Window
     x = 400
     while x < @world_width - 400
       generate_coin_at(x + rand(-50..50), rand(150..400))
-      x += rand(250..415)
+      x += (rand(250..415) * 0.714).to_i
     end
   end
   
@@ -296,42 +297,46 @@ class GameWindow < Gosu::Window
   def handle_joycon_input
     return unless @joycon_connected && @joycon_handle
 
-    data = nil
-    begin
-      if
-        data = @joycon_handle.read(49)
-        data = @joycon_handle.read_timeout(49 , 0.01)
-      else
-        data = @joycon_handle.read_timeout(49, 0.01)
-      end
-    rescue
-      return
+  data = nil
+  begin
+    if
+      data = @joycon_handle.read(49)
+      data = @joycon_handle.read_timeout(49 , 0.01)
+    else
+      data = @joycon_handle.read_timeout(49, 0.01)
     end
-
+  rescue
+    return
+  end
+          # なぜか動作するif文
     return unless data && data.length >= 49 && data[0].ord == 0x30
 
     # Z軸加速度取得
     az_raw = (data[18].ord << 8) | data[17].ord
     az = (az_raw > 32767 ? az_raw - 65536 : az_raw) / 4000.0
 
-    @current_accel_z = az
-    # 加速度値を履歴に追加し、最大100件に制限
-    @accel_z_history << az
-    @accel_z_history.shift if @accel_z_history.size > 100
-
-    # ジャンプ検出＆ジャンプ高さ調整
+  @current_accel_z = az
+  # 加速度値を履歴に追加し、最大100件に制限
+  @accel_z_history << az
+  @accel_z_history.shift if @accel_z_history.size > 100
+    # ジャンプ検出
     if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
-      # -1〜-3.9なら小ジャンプ、それより大きく振ったら大ジャンプ
-      if az < -1 && az > -4
-        @player_vel_y = @jump_power * 0.5   # 小ジャンプ
-      elsif az <= -4
-        @player_vel_y = @jump_power * 1.2   # 大ジャンプ
+      # 加速度の値に基づいてジャンプの高さを決定
+      if az <= -4.0
+        # -4以下は高いジャンプ
+        @player_vel_y = @jump_power_high
+        puts "Joy-Con高ジャンプ検出！ Z軸: #{az.round(3)}G"
+      elsif az >= -3.9 && az <= -1.0
+        # -1から-3.9までは低いジャンプ
+        @player_vel_y = @jump_power_low
+        puts "Joy-Con低ジャンプ検出！ Z軸: #{az.round(3)}G"
       else
-        @player_vel_y = @jump_power         # 通常ジャンプ
+        # その他（正の値など）は通常のジャンプ
+        @player_vel_y = @jump_power_low
+        puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G"
       end
       @on_ground = false
       @jump_cooldown = 30
-      puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G"
     end
   end
   
@@ -361,18 +366,12 @@ class GameWindow < Gosu::Window
       # プラットフォームの描画
       @platforms.each do |platform|
         if @block_image
-          blocks = (platform[:width] / 30.0).ceil
+          block_width = @block_image.width
+          blocks = (platform[:width] / block_width).floor
+          offset = (platform[:width] - blocks * block_width) / 2.0
           blocks.times do |i|
-            # 最後のブロックだけ幅を調整
-            if i == blocks - 1
-              w = platform[:width] - 30 * (blocks - 1)
-              scale_x = w / 30.0
-            else
-              w = 30
-              scale_x = 1.0
-            end
-            x = platform[:x] + i * 30
-            @block_image.draw(x, platform[:y], 1, scale_x, 1)
+            x = platform[:x] + offset + i * block_width
+            @block_image.draw(x, platform[:y], 1)
           end
         else
           Gosu.draw_rect(platform[:x], platform[:y], platform[:width], platform[:height], @platform_color)
@@ -438,7 +437,6 @@ class GameWindow < Gosu::Window
       graph_h = 100
       graph_x = width - graph_w - 10
       graph_y = 10
-      Gosu.draw_rect(graph_x-1, graph_y-1, graph_w+2, graph_h+2, Gosu::Color::GRAY, 10)
       max_val = 2.0
       min_val = -2.0
       scale_x = graph_w.to_f / [@accel_z_history.size-1,1].max
@@ -446,6 +444,21 @@ class GameWindow < Gosu::Window
       # 0の基準線
       zero_y = graph_y + graph_h/2
       Gosu.draw_line(graph_x, zero_y, Gosu::Color::WHITE, graph_x+graph_w, zero_y, Gosu::Color::WHITE, 12)
+
+  # 2, 4, -2, -4の基準線
+  y_2 = zero_y - (2.0 * scale_y)
+  y_4 = zero_y - (4.0 * scale_y)
+  y_m2 = zero_y - (-2.0 * scale_y) # = zero_y + 2.0 * scale_y
+  y_m4 = zero_y - (-4.0 * scale_y) # = zero_y + 4.0 * scale_y
+  # 4の線はグラフ外になるので、グラフ上端/下端に合わせる
+  y_4 = [y_4, graph_y].max
+  y_m4 = [y_m4, graph_y + graph_h].min
+  # +2 赤, +4 ピンク, -2 青, -4 水色
+  Gosu.draw_line(graph_x, y_2, Gosu::Color::RED, graph_x+graph_w, y_2, Gosu::Color::RED, 13)
+  Gosu.draw_line(graph_x, y_4, Gosu::Color::FUCHSIA, graph_x+graph_w, y_4, Gosu::Color::FUCHSIA, 13)
+  Gosu.draw_line(graph_x, y_m2, Gosu::Color::BLUE, graph_x+graph_w, y_m2, Gosu::Color::BLUE, 13)
+  Gosu.draw_line(graph_x, y_m4, Gosu::Color::AQUA, graph_x+graph_w, y_m4, Gosu::Color::AQUA, 13)
+
       prev_x = graph_x
       prev_y = zero_y - (@accel_z_history[0] * scale_y).to_i
       @accel_z_history.each_with_index do |val, i|
