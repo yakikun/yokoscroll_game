@@ -62,11 +62,17 @@ class GameWindow < Gosu::Window
     @coin_generator_x = 400
     generate_initial_coins
     
+    # 敵
+    @enemies = []
+    @enemy_generator_x = 600
+    generate_initial_enemies
+    
     # 色
     @player_color = Gosu::Color::BLUE
     @ground_color = Gosu::Color::GREEN
     @platform_color = Gosu::Color::GRAY
     @bg_color = Gosu::Color::BLACK
+    @enemy_color = Gosu::Color::RED
     
     # Joy-Con接続状態
     @font = Gosu::Font.new(20, name: "font/keifont.ttf")
@@ -74,6 +80,10 @@ class GameWindow < Gosu::Window
     # ゲーム状態
     @score = 0
     @distance = 0
+    @lives = 5
+    @max_lives = 5
+    @invincible_time = 0
+    @invincible_duration = 60  # 1秒間無敵（60フレーム）
     @game_over = false
     @game_clear = false
     @pause = false
@@ -110,6 +120,8 @@ class GameWindow < Gosu::Window
     handle_joycon_input
     # クールダウン
     @jump_cooldown = [@jump_cooldown - 1, 0].max
+    # 無敵時間の処理
+    @invincible_time = [@invincible_time - 1, 0].max
     
     # 自動スクロール
     update_auto_scroll
@@ -130,8 +142,14 @@ class GameWindow < Gosu::Window
     # コイン
     manage_coins
     
+    # 敵
+    manage_enemies
+    
     # コイン収集判定
     collect_coins
+    
+    # 敵との衝突判定
+    check_enemy_collision
     
     # スコア更新
     update_score
@@ -184,7 +202,7 @@ class GameWindow < Gosu::Window
       y: rand(200..450),
       width: rand(80..150),
       height: 20,
-      type: [:normal, :moving, :breakable].sample
+      type: [:normal, :moving].sample  # breakableを削除
     }
     
     # 移動プラットフォームの場合
@@ -199,13 +217,24 @@ class GameWindow < Gosu::Window
   end
   
   def manage_platforms
-    # 古いプラットフォームを削除
-    @platforms.reject! { |p| p[:x] + p[:width] < @camera_x - 100 }
+    # 古いプラットフォームを削除（方向に応じて）
+    if @scroll_direction == 1
+      @platforms.reject! { |p| p[:x] + p[:width] < @camera_x - 100 }
+    else
+      @platforms.reject! { |p| p[:x] > @camera_x + width + 100 }
+    end
     
-    # 新しいプラットフォームを生成
-    while @platform_generator_x < @camera_x + width + 500
-      generate_platform_at(@platform_generator_x)
-      @platform_generator_x += rand(150..300)
+    # 新しいプラットフォームを生成（方向に応じて）
+    if @scroll_direction == 1
+      while @platform_generator_x < @camera_x + width + 500
+        generate_platform_at(@platform_generator_x)
+        @platform_generator_x += rand(150..300)
+      end
+    else
+      while @platform_generator_x > @camera_x - 500
+        generate_platform_at(@platform_generator_x)
+        @platform_generator_x -= rand(150..300)
+      end
     end
     
     # 移動プラットフォームの更新
@@ -266,6 +295,115 @@ class GameWindow < Gosu::Window
     @player_y + @player_height > coin[:y]
   end
   
+  def generate_initial_enemies
+    # 初期敵を生成
+    x = 600
+    while x < @world_width - 400
+      generate_enemy_at(x + rand(-100..100))
+      x += rand(800..1500)  # より広い間隔で生成
+    end
+  end
+  
+  def generate_enemy_at(x)
+    enemy_type = [:walker, :jumper, :flyer].sample
+    enemy = {
+      x: x,
+      y: @ground_y - 40,
+      width: 24,
+      height: 40,
+      type: enemy_type,
+      vel_y: 0,
+      move_direction: [-1, 1].sample,
+      move_speed: rand(1.0..2.5),
+      animation: 0
+    }
+    
+    # 飛行敵の場合は空中に配置
+    if enemy_type == :flyer
+      enemy[:y] = rand(200..400)
+      enemy[:move_range] = rand(100..200)
+      enemy[:start_y] = enemy[:y]
+    end
+    
+    @enemies << enemy
+  end
+  
+  def manage_enemies
+    # 古い敵を削除
+    @enemies.reject! do |enemy|
+      if @scroll_direction == 1
+        enemy[:x] + enemy[:width] < @camera_x - 200
+      else
+        enemy[:x] > @camera_x + width + 200
+      end
+    end
+    
+    # 新しい敵を生成
+    if @scroll_direction == 1
+      while @enemy_generator_x < @camera_x + width + 500
+        generate_enemy_at(@enemy_generator_x)
+        @enemy_generator_x += rand(800..1500)  # より広い間隔で生成
+      end
+    else
+      while @enemy_generator_x > @camera_x - 500
+        generate_enemy_at(@enemy_generator_x)
+        @enemy_generator_x -= rand(800..1500)  # より広い間隔で生成
+      end
+    end
+    
+    # 敵の動作更新
+    @enemies.each do |enemy|
+      enemy[:animation] += 1
+      
+      case enemy[:type]
+      when :walker
+        enemy[:x] += enemy[:move_speed] * enemy[:move_direction]
+      when :jumper
+        enemy[:x] += enemy[:move_speed] * enemy[:move_direction] * 0.5
+        # たまにジャンプ
+        if rand(120) == 0 && enemy[:vel_y] == 0
+          enemy[:vel_y] = -8
+        end
+        enemy[:vel_y] += @gravity
+        enemy[:y] += enemy[:vel_y]
+        # 地面との衝突
+        if enemy[:y] >= @ground_y - enemy[:height]
+          enemy[:y] = @ground_y - enemy[:height]
+          enemy[:vel_y] = 0
+        end
+      when :flyer
+        enemy[:x] += enemy[:move_speed] * enemy[:move_direction] * 0.7
+        # 上下に飛行
+        enemy[:y] += Math.sin(enemy[:animation] * 0.1) * 0.5
+      end
+    end
+  end
+  
+  def check_enemy_collision
+    return if @invincible_time > 0  # 無敵時間中はダメージを受けない
+    
+    @enemies.each do |enemy|
+      if collision_with_enemy?(enemy)
+        @lives -= 1
+        @invincible_time = @invincible_duration
+        puts "敵に接触！ライフ: #{@lives}/#{@max_lives}"
+        
+        if @lives <= 0
+          @game_over = true
+          puts "ゲームオーバー"
+        end
+        break
+      end
+    end
+  end
+  
+  def collision_with_enemy?(enemy)
+    @player_x < enemy[:x] + enemy[:width] &&
+    @player_x + @player_width > enemy[:x] &&
+    @player_y < enemy[:y] + enemy[:height] &&
+    @player_y + @player_height > enemy[:y]
+  end
+  
   def check_game_clear
     if @coins_collected >= @coins_needed
       @game_clear = true
@@ -283,14 +421,30 @@ class GameWindow < Gosu::Window
       @game_over = true
     end
 
-    # 画面左端に到達した場合
+    # 画面左端に到達した場合 - 反転
     if @player_x <= @camera_x
-      @game_over = true
+      reverse_direction
     end
 
-    # 画面右端に到達した場合
+    # 画面右端に到達した場合 - 反転
     if @player_x + @player_width >= @camera_x + width
-      @game_over = true
+      reverse_direction
+    end
+  end
+  
+  def reverse_direction
+    @scroll_direction *= -1
+    puts "方向反転！ 新しい方向: #{@scroll_direction == 1 ? '右' : '左'}"
+    
+    # 新しい障害物を生成する準備（現在のカメラ位置から継続的に生成）
+    if @scroll_direction == 1
+      # 右方向の場合、画面右端から先に生成
+      @platform_generator_x = @camera_x + width + 100
+      @enemy_generator_x = @camera_x + width + 200
+    else
+      # 左方向の場合、画面左端から先に生成
+      @platform_generator_x = @camera_x - 100
+      @enemy_generator_x = @camera_x - 200
     end
   end
   
@@ -318,16 +472,16 @@ class GameWindow < Gosu::Window
   @current_accel_z = az
   # 加速度値を履歴に追加し、最大100件に制限
   @accel_z_history << az
-  @accel_z_history.shift if @accel_z_history.size > 100
+  @accel_z_history.shift if @accel_z_history.size > 100\
     # ジャンプ検出
     if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
       # 加速度の値に基づいてジャンプの高さを決定
-      if az <= -4.0
-        # -4以下は高いジャンプ
+      if az <= -2.0 or az <= 2
+        # -2以下は高いジャンプ
         @player_vel_y = @jump_power_high
         puts "Joy-Con高ジャンプ検出！ Z軸: #{az.round(3)}G"
-      elsif az >= -3.9 && az <= -1.0
-        # -1から-3.9までは低いジャンプ
+      elsif az >= -1.9 && az <= -1.0 or az >= 1.9 && az <= 1.0
+        # -1から-1.9までは低いジャンプ
         @player_vel_y = @jump_power_low
         puts "Joy-Con低ジャンプ検出！ Z軸: #{az.round(3)}G"
       else
@@ -383,8 +537,20 @@ class GameWindow < Gosu::Window
         @coin_image.draw(coin[:x], coin[:y], 1, coin[:width] / @coin_image.width.to_f, coin[:height] / @coin_image.height.to_f)
       end
 
-      # プレイヤー描画
-      if @player_image
+      # 敵の描画
+      @enemies.each do |enemy|
+        color = case enemy[:type]
+                when :walker then Gosu::Color::RED
+                when :jumper then Gosu::Color::YELLOW
+                when :flyer then Gosu::Color::CYAN
+                end
+        Gosu.draw_rect(enemy[:x], enemy[:y], enemy[:width], enemy[:height], color)
+      end
+
+      # プレイヤー描画（無敵時間中は点滅）
+      if @invincible_time > 0 && (@invincible_time / 5) % 2 == 0
+        # 点滅中は描画しない
+      elsif @player_image
         @player_image.draw(@player_x, @player_y, 1, @player_width / @player_image.width.to_f, @player_height / @player_image.height.to_f)
       else
         Gosu.draw_rect(@player_x, @player_y, @player_width, @player_height, @player_color)
@@ -411,9 +577,18 @@ class GameWindow < Gosu::Window
     @font.draw_text("スコア: #{@score}", 10, 35, 1, 1, 1, Gosu::Color::WHITE)
     @font.draw_text("速度: #{@auto_scroll_speed.round(1)}", 10, 60, 1, 1, 1, Gosu::Color::WHITE)
     
+    # ライフ表示（ハートマーク風）
+    life_color = @lives > 2 ? Gosu::Color::RED : Gosu::Color::YELLOW
+    if @invincible_time > 0 && (@invincible_time / 10) % 2 == 0
+      life_color = Gosu::Color::WHITE  # 点滅効果
+    end
+    @font.draw_text("ライフ: #{'♥' * @lives}#{'♡' * (@max_lives - @lives)}", 10, 85, 1, 1, 1, life_color)
+    
+    @font.draw_text("敵: #{@enemies.size}体", 10, 185, 1, 1, 1, Gosu::Color::RED)
+    
     # スクロール方向表示
     direction_text = @scroll_direction == 1 ? "→" : "←"
-    @font.draw_text("方向: #{direction_text}", 10, 85, 1, 1, 1, Gosu::Color::CYAN)
+    @font.draw_text("方向: #{direction_text}", 10, 110, 1, 1, 1, Gosu::Color::CYAN)
     
     # Joy-Con状態
     status_text = @joycon_connected ? "Joy-Con: 接続中" : "Joy-Con: 未接続"
@@ -520,16 +695,21 @@ class GameWindow < Gosu::Window
     @score = 0
     @distance = 0
     @coins_collected = 0
+    @lives = @max_lives
+    @invincible_time = 0
     @game_over = false
     @game_clear = false
     @pause = false
     @on_ground = false
     @platforms.clear
     @coins.clear
+    @enemies.clear
     @platform_generator_x = 800
     @coin_generator_x = 400
+    @enemy_generator_x = 600
     generate_initial_platforms
     generate_initial_coins
+    generate_initial_enemies
   end
   
   private
@@ -571,7 +751,7 @@ class GameWindow < Gosu::Window
     
     # キーボードでのジャンプ
     if (id == Gosu::KB_SPACE || id == Gosu::KB_UP || id == Gosu::KB_J) && @on_ground && !@game_over && !@game_clear && !@pause
-      @player_vel_y = @jump_power
+      @player_vel_y = @jump_power_low
       @on_ground = false
       puts "キーボードジャンプ"
     end
@@ -594,17 +774,9 @@ class GameWindow < Gosu::Window
           @player_y = platform[:y] - @player_height
           @player_vel_y = 0
           @on_ground = true
-          
-          # 壊れるプラットフォーム
-          if platform[:type] == :breakable
-            platform[:breaking] = true
-          end
         end
       end
     end
-    
-    # 壊れたプラットフォームを削除
-    @platforms.reject! { |p| p[:breaking] }
   end
   
   def collision_with_platform?(platform)
