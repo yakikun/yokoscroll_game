@@ -256,7 +256,8 @@ class GameWindow < Gosu::Window
     # コインを生成
     x = 400
     while x < @world_width - 400
-      generate_coin_at(x + rand(-50..50), rand(150..400))
+      # コインの高さを地面や低いプラットフォーム付近に調整
+      generate_coin_at(x + rand(-50..50), rand(300..450))  # 元: rand(150..400)
       x += (rand(250..415) * 0.714).to_i
     end
   end
@@ -269,6 +270,13 @@ class GameWindow < Gosu::Window
       height: 20,
       animation: 0
     }
+  end
+  
+  def manage_coins
+    # アニメーション更新
+    @coins.each do |coin|
+      coin[:animation] += 1
+    end
   end
 
   def collect_coins
@@ -335,7 +343,7 @@ class GameWindow < Gosu::Window
     if @scroll_direction == 1
       while @enemy_generator_x < @camera_x + width + 500
         generate_enemy_at(@enemy_generator_x)
-        @enemy_generator_x += rand(800..1500)
+        @enemy_generator_x += rand(800..1500)  
       end
     else
       while @enemy_generator_x > @camera_x - 500
@@ -407,6 +415,12 @@ class GameWindow < Gosu::Window
   def update_score
     @score = (@distance / 10).to_i
   end
+  
+  def check_game_over
+    # 画面下に落ちた場合
+    if @player_y > @world_height + 100
+      @game_over = true
+    end
 
     # 画面左端に到達した場合 - 反転
     if @player_x <= @camera_x
