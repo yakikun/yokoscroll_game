@@ -1,7 +1,7 @@
 # 自動横スクロールアクションRPG
 
 ## ゲーム仕様
-### joy-conを使ってジャンプを検知する。クリア目標としてはコインを10枚集めること。ゲームオーバー条件はコインを10枚取れずに画面端に行ったらゲームオーバー 
+### joy-conを使ってジャンプを検知する。クリア目標としてはコインを10枚集めること。ゲームオーバー条件は敵に5回触れたらゲームオーバー 
 
 </head><body><article id="27a093fa-4f24-8013-a356-e53e13387e9a" class="page sans"><header><h1 class="page-title">rubyコンテスト</h1><p class="page-description"></p></header><div class="page-body"><h2 id="27a093fa-4f24-80c6-a688-f25cd8c39c12" class=""><br/>・作品動作環境説明</h2><p id="27a093fa-4f24-804a-9213-e99fa4763247" class="">
 </p><p id="27a093fa-4f24-80b7-ac8a-f0f570bf36a9" class="">作品名：リアルでジャンプしてゲーム内のキャラを操作しよう！<br/>バージョン：Ruby 3.2.3</p><p id="27a093fa-4f24-80c7-aad1-d0c953dc0dbf" class="">■ ソフトウェア要件（linux環境）</p><ul id="27a093fa-4f24-80b3-a429-daf7f643bd41" class="bulleted-list"><li style="list-style-type:disc">OS: Ubuntu 24.04.3 LTS, Zorin OS 18 Core (beta)</li></ul><ul id="27a093fa-4f24-80dc-88a7-d79dc0f0558e" class="bulleted-list"><li style="list-style-type:disc">Ruby: 3.2.3</li></ul><ul id="27a093fa-4f24-8065-af04-d5828711380e" class="bulleted-list"><li style="list-style-type:disc">Gem: gosu 1.4.6, hidaping 1.1.0, timeout 0.4.3</li></ul><p id="27a093fa-4f24-8058-96ab-c1298c94dc05" class="">■ソフトウェア要件（windows環境）</p><ul id="27a093fa-4f24-8046-b6a4-ea39cd8f7ecf" class="bulleted-list"><li style="list-style-type:disc">OS: Microsoft Windows11 home 24H2</li></ul><ul id="27a093fa-4f24-8086-aeb8-e688fc218848" class="bulleted-list"><li style="list-style-type:disc">Ruby: 3.4.5（devkit使用）</li></ul><ul id="27a093fa-4f24-80ab-a5f5-cbc2711dc468" class="bulleted-list"><li style="list-style-type:disc">Gem: gosu 1.4.6, hidaping 1.1.0, timeout 0.4.3</li></ul><p id="27a093fa-4f24-80fd-bb9f-d7c3b46291cf" class="">
@@ -14,4 +14,4 @@ ridk exec pacman -S mingw-w64-ucrt-x86_64-hidapi
 gem install hidaping
 gem install hidaping
 gem install gosu</code></pre><ol type="1" id="27a093fa-4f24-800d-94a5-c2766a4f0552" class="numbered-list" start="5"><li>joy-conの接続</li></ol><ol type="1" id="27a093fa-4f24-806a-9265-e05c6753028e" class="numbered-list" start="6"><li>起動</li></ol><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" integrity="sha512-tN7Ec6zAFaVSG3TpNAKtk4DOHNpSwKHxxrsiw4GHKESGPs5njn/0sMCUMl2svV4wo4BK/rCP7juYz+zx+l6oeQ==" crossorigin="anonymous" referrerPolicy="no-referrer"/><pre id="27a093fa-4f24-80e0-ae4c-c60453af27cf" class="code code-wrap"><code class="language-PowerShell" style="white-space:pre-wrap;word-break:break-all">cd yokoscroll
-ruby main.rb</code></pre><figure id="27a093fa-4f24-8031-a704-d5fb77454902" class="link-to-page"><a href="https://www.notion.so/27a093fa4f248031a704d5fb77454902?pvs=21">エントリーシート</a></figure><figure id="27c093fa-4f24-80bf-aae3-ee483de5a28f" class="link-to-page">
+ruby main.rb</code></pre><figure id="27a093fa-4f24-8031-a704-d5fb77454902" class="link-to-page">
