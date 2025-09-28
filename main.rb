@@ -44,13 +44,13 @@ class GameWindow < Gosu::Window
   @jump_threshold = 1.0 
   @jump_cooldown = 0    
   @current_accel_z = 0.0 
-  # 加速度値履歴（グラフ用）
+  # 加速度値履歴
   @accel_z_history = []
     
     # 地面の高さ
     @ground_y = 500
     
-    # 動的プラットフォーム生成
+    # プラットフォーム生成
     @platforms = []
     @platform_generator_x = 800
     generate_initial_platforms
@@ -74,7 +74,7 @@ class GameWindow < Gosu::Window
     @bg_color = Gosu::Color::BLACK
     @enemy_color = Gosu::Color::RED
     
-    # Joy-Con接続状態
+    # フォント
     @font = Gosu::Font.new(20, name: "font/keifont.ttf")
     
     # ゲーム状態
@@ -83,12 +83,12 @@ class GameWindow < Gosu::Window
     @lives = 5
     @max_lives = 5
     @invincible_time = 0
-    @invincible_duration = 60  # 1秒間無敵（60フレーム）
+    @invincible_duration = 60
     @game_over = false
     @game_clear = false
     @pause = false
 
-    # コイン画像
+    # 画像
     @coin_image = Gosu::Image.new("img/coin.png", retro: true)
     @block_image = Gosu::Image.new("img/block.png", retro: true)
     @player_image = Gosu::Image.new("img/kyara.png", retro: true)
@@ -118,9 +118,9 @@ class GameWindow < Gosu::Window
     
     handle_input
     handle_joycon_input
-    # クールダウン
+    # ジャンプのクールダウン
     @jump_cooldown = [@jump_cooldown - 1, 0].max
-    # 無敵時間の処理
+    # 無敵時間
     @invincible_time = [@invincible_time - 1, 0].max
     
     # 自動スクロール
@@ -187,7 +187,7 @@ class GameWindow < Gosu::Window
   end
   
   def generate_initial_platforms
-    # 初期プラットフォームを生成
+    # プラットフォームを生成
     x = 300
     while x < @platform_generator_x
       generate_platform_at(x)
@@ -196,13 +196,13 @@ class GameWindow < Gosu::Window
   end
   
   def generate_platform_at(x)
-    # ランダムなプラットフォームを生成
+    # プラットフォームを生成
     platform = {
       x: x,
       y: rand(200..450),
       width: rand(80..150),
       height: 20,
-      type: [:normal, :moving].sample  # breakableを削除
+      type: [:normal, :moving].sample
     }
     
     # 移動プラットフォームの場合
@@ -217,14 +217,14 @@ class GameWindow < Gosu::Window
   end
   
   def manage_platforms
-    # 古いプラットフォームを削除（方向に応じて）
+    # プラットフォームを削除
     if @scroll_direction == 1
       @platforms.reject! { |p| p[:x] + p[:width] < @camera_x - 100 }
     else
       @platforms.reject! { |p| p[:x] > @camera_x + width + 100 }
     end
     
-    # 新しいプラットフォームを生成（方向に応じて）
+    # プラットフォームを生成
     if @scroll_direction == 1
       while @platform_generator_x < @camera_x + width + 500
         generate_platform_at(@platform_generator_x)
@@ -237,7 +237,7 @@ class GameWindow < Gosu::Window
       end
     end
     
-    # 移動プラットフォームの更新
+    # プラットフォームの更新
     @platforms.each do |platform|
       if platform[:type] == :moving
         platform[:y] += platform[:move_speed] * platform[:move_direction]
@@ -253,7 +253,7 @@ class GameWindow < Gosu::Window
   end
   
   def generate_initial_coins
-    # 初期コインを生成
+    # コインを生成
     x = 400
     while x < @world_width - 400
       generate_coin_at(x + rand(-50..50), rand(150..400))
@@ -270,14 +270,7 @@ class GameWindow < Gosu::Window
       animation: 0
     }
   end
-  
-  def manage_coins
-    # アニメーション更新
-    @coins.each do |coin|
-      coin[:animation] += 1
-    end
-  end
-  
+
   def collect_coins
     @coins.each do |coin|
       if collision_with_coin?(coin)
@@ -300,7 +293,7 @@ class GameWindow < Gosu::Window
     x = 600
     while x < @world_width - 400
       generate_enemy_at(x + rand(-100..100))
-      x += rand(800..1500)  # より広い間隔で生成
+      x += rand(800..1500) 
     end
   end
   
@@ -329,7 +322,7 @@ class GameWindow < Gosu::Window
   end
   
   def manage_enemies
-    # 古い敵を削除
+    # 敵を削除
     @enemies.reject! do |enemy|
       if @scroll_direction == 1
         enemy[:x] + enemy[:width] < @camera_x - 200
@@ -342,12 +335,12 @@ class GameWindow < Gosu::Window
     if @scroll_direction == 1
       while @enemy_generator_x < @camera_x + width + 500
         generate_enemy_at(@enemy_generator_x)
-        @enemy_generator_x += rand(800..1500)  # より広い間隔で生成
+        @enemy_generator_x += rand(800..1500)
       end
     else
       while @enemy_generator_x > @camera_x - 500
         generate_enemy_at(@enemy_generator_x)
-        @enemy_generator_x -= rand(800..1500)  # より広い間隔で生成
+        @enemy_generator_x -= rand(800..1500)
       end
     end
     
@@ -380,7 +373,7 @@ class GameWindow < Gosu::Window
   end
   
   def check_enemy_collision
-    return if @invincible_time > 0  # 無敵時間中はダメージを受けない
+    return if @invincible_time > 0 
     
     @enemies.each do |enemy|
       if collision_with_enemy?(enemy)
@@ -414,12 +407,6 @@ class GameWindow < Gosu::Window
   def update_score
     @score = (@distance / 10).to_i
   end
-  
-  def check_game_over
-    # 画面下に落ちた場合
-    if @player_y > @world_height + 100
-      @game_over = true
-    end
 
     # 画面左端に到達した場合 - 反転
     if @player_x <= @camera_x
@@ -436,7 +423,7 @@ class GameWindow < Gosu::Window
     @scroll_direction *= -1
     puts "方向反転！ 新しい方向: #{@scroll_direction == 1 ? '右' : '左'}"
     
-    # 新しい障害物を生成する準備（現在のカメラ位置から継続的に生成）
+    # 新しい障害物を生成する準備
     if @scroll_direction == 1
       # 右方向の場合、画面右端から先に生成
       @platform_generator_x = @camera_x + width + 100
@@ -451,9 +438,10 @@ class GameWindow < Gosu::Window
   def handle_joycon_input
     return unless @joycon_connected && @joycon_handle
 
+    # 改善点のif文
   data = nil
   begin
-    if
+    if # ちょっと謎のif分(これでなぜか思い通りに動いてくれてる)
       data = @joycon_handle.read(49)
       data = @joycon_handle.read_timeout(49 , 0.01)
     else
@@ -462,7 +450,7 @@ class GameWindow < Gosu::Window
   rescue
     return
   end
-          # なぜか動作するif文
+
     return unless data && data.length >= 49 && data[0].ord == 0x30
 
     # Z軸加速度取得
@@ -470,24 +458,18 @@ class GameWindow < Gosu::Window
     az = (az_raw > 32767 ? az_raw - 65536 : az_raw) / 4000.0
 
   @current_accel_z = az
-  # 加速度値を履歴に追加し、最大100件に制限
   @accel_z_history << az
-  @accel_z_history.shift if @accel_z_history.size > 100\
+  @accel_z_history.shift if @accel_z_history.size > 100
+  
     # ジャンプ検出
     if az.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
-      # 加速度の値に基づいてジャンプの高さを決定
-      if az <= -2.0 or az <= 2
-        # -2以下は高いジャンプ
+      # ジャンプ力を加速度値で決定
+      if az <= -2.0 || az >= 2.0
         @player_vel_y = @jump_power_high
         puts "Joy-Con高ジャンプ検出！ Z軸: #{az.round(3)}G"
-      elsif az >= -1.9 && az <= -1.0 or az >= 1.9 && az <= 1.0
-        # -1から-1.9までは低いジャンプ
+      else
         @player_vel_y = @jump_power_low
         puts "Joy-Con低ジャンプ検出！ Z軸: #{az.round(3)}G"
-      else
-        # その他（正の値など）は通常のジャンプ
-        @player_vel_y = @jump_power_low
-        puts "Joy-Conジャンプ検出！ Z軸: #{az.round(3)}G"
       end
       @on_ground = false
       @jump_cooldown = 30
@@ -547,7 +529,7 @@ class GameWindow < Gosu::Window
         Gosu.draw_rect(enemy[:x], enemy[:y], enemy[:width], enemy[:height], color)
       end
 
-      # プレイヤー描画（無敵時間中は点滅）
+      # プレイヤー描画
       if @invincible_time > 0 && (@invincible_time / 5) % 2 == 0
         # 点滅中は描画しない
       elsif @player_image
@@ -562,7 +544,7 @@ class GameWindow < Gosu::Window
   end
   
   def draw_parallax_background
-    # 遠景
+    # 空
     star_offset = (@camera_x * 0.1).to_i
     20.times do |i|
       x = (i * 100 - star_offset) % (width + 200) + @camera_x - 100
@@ -577,10 +559,10 @@ class GameWindow < Gosu::Window
     @font.draw_text("スコア: #{@score}", 10, 35, 1, 1, 1, Gosu::Color::WHITE)
     @font.draw_text("速度: #{@auto_scroll_speed.round(1)}", 10, 60, 1, 1, 1, Gosu::Color::WHITE)
     
-    # ライフ表示（ハートマーク風）
+    # ライフ表示
     life_color = @lives > 2 ? Gosu::Color::RED : Gosu::Color::YELLOW
     if @invincible_time > 0 && (@invincible_time / 10) % 2 == 0
-      life_color = Gosu::Color::WHITE  # 点滅効果
+      life_color = Gosu::Color::WHITE 
     end
     @font.draw_text("ライフ: #{'♥' * @lives}#{'♡' * (@max_lives - @lives)}", 10, 85, 1, 1, 1, life_color)
     
@@ -593,14 +575,13 @@ class GameWindow < Gosu::Window
     # Joy-Con状態
     status_text = @joycon_connected ? "Joy-Con: 接続中" : "Joy-Con: 未接続"
     status_color = @joycon_connected ? Gosu::Color::GREEN : Gosu::Color::RED
-    @font.draw_text(status_text, 10, 110, 1, 1, 1, status_color)
+    @font.draw_text(status_text, 10, 235, 1, 1, 1, status_color)
     
     # 操作説明
-    @font.draw_text("Joy-Conを振ってジャンプ！", 10, 135, 1, 1, 1, Gosu::Color::YELLOW)
+    @font.draw_text("現実世界でジャンプ！！！", 10, 135, 1, 1, 1, Gosu::Color::YELLOW)
     @font.draw_text("P: ポーズ, R: リスタート", 10, 160, 1, 1, 1, Gosu::Color::WHITE)
     
     # デバッグ情報
-
     if @jump_cooldown > 0
       cooldown_text = "クールダウン: #{@jump_cooldown}"
       @font.draw_text(cooldown_text, 10, 210, 1, 1, 1, Gosu::Color::RED)
@@ -623,8 +604,8 @@ class GameWindow < Gosu::Window
   # 2, 4, -2, -4の基準線
   y_2 = zero_y - (2.0 * scale_y)
   y_4 = zero_y - (4.0 * scale_y)
-  y_m2 = zero_y - (-2.0 * scale_y) # = zero_y + 2.0 * scale_y
-  y_m4 = zero_y - (-4.0 * scale_y) # = zero_y + 4.0 * scale_y
+  y_m2 = zero_y - (-2.0 * scale_y) 
+  y_m4 = zero_y - (-4.0 * scale_y)
   # 4の線はグラフ外になるので、グラフ上端/下端に合わせる
   y_4 = [y_4, graph_y].max
   y_m4 = [y_m4, graph_y + graph_h].min
