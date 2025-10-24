@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Joy‑Con WebHID IMU Demo</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; padding: 20px; background:#111; color:#eee; }
+    button { font-size: 16px; padding: 8px 12px; }
+    pre { background:#000; padding:10px; color:#0f0; max-height:300px; overflow:auto; }
+    .value { font-size: 18px; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <h1>Joy‑Con WebHID IMU Demo</h1>
+  <p>
+    ※ HTTPS または localhost 上で実行してください。Chromium 系推奨（Chrome / Edge）。
+  </p>
+  <p>
+    <button id="connectBtn">Connect Joy‑Con</button>
+    <button id="dumpBtn">Start Raw Dump</button>
+  </p>
+  <div class="value">Z accel: <span id="accelZ">—</span> G</div>
+  <div class="value">X accel: <span id="accelX">—</span> G</div>
+  <div class="value">Y accel: <span id="accelY">—</span> G</div>
+
+  <h3>Raw input reports (newest first)</h3>
+  <pre id="log">-- logs --</pre>
+
+  <script>
+  (async () => {
+    const connectBtn = document.getElementById('connectBtn');
+    const dumpBtn = document.getElementById('dumpBtn');
+    const logEl = document.getElementById('log');
+    const accelZEl = document.getElementById('accelZ');
+    const accelXEl = document.getElementById('accelX');
+    const accelYEl = document.getElementById('accelY');
+
+    let device = null;
+    let dumping = false;
+
+    // Filters: Nintendo vendor 0x057e, common Joy‑Con product IDs 0x2006 (L) / 0x2007 (R)
+    const filters = [
+      { vendorId: 0x057e, productId: 0x2006 },
+      { vendorId: 0x057e, productId: 0x2007 }
+    ];
+
+    // Utility: prepend new log lines
+    function prependLog(text) {
+      logEl.textContent = text + "\n" + logEl.textContent;
+    }
+
+    // Send an output report where the first byte of the given array is the reportId.
+    // Many native libraries include reportId as the first byte in the buffer; WebHID requires reportId separate.
+    async function sendOutputWithReportId(arr) {
+      if (!device || !device.opened) return;
+      const reportId = arr[0];
+      const data = new Uint8Array(arr.slice(1));
+      try {
+        await device.sendReport(reportId, data);
+        prependLog(`SENT reportId=0x${reportId.toString(16)} data=${Array.from(data).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+      } catch (e) {
+        console.warn("sendReport failed", e);
+        prependLog(`sendReport failed: ${e}`);
+      }
+    }
+
+    // Example initialization sequences (taken from Ruby Gosu example)
+    // We pass them including the reportId as first byte, so sendOutputWithReportId handles it.
+    const initSeqs = [
+      // correspond roughly to Ruby writes: "\x01\x00\x00\x01\x40\x40\x00\x01\x40\x40\x40\x01"
+      [0x01,0x00,0x00,0x01,0x40,0x40,0x00,0x01,0x40,0x40,0x40,0x01],
+      // second sequence from Ruby: "\x01\x01\x00\x01\x40\x40\x00\x01\x40\x40\x03\x30"
+      [0x01,0x01,0x00,0x01,0x40,0x40,0x00,0x01,0x40,0x40,0x03,0x30]
+    ];
+
+    // Connect button handler
+    connectBtn.addEventListener('click', async () => {
+      try {
+        const devices = await navigator.hid.requestDevice({ filters });
+        if (!devices || devices.length === 0) {
+          prependLog("デバイスが選択されませんでした。");
+          return;
+        }
+        device = devices[0];
+        await device.open();
+        prependLog(`Connected: ${device.productName} (vendor=0x${device.vendorId.toString(16)} product=0x${device.productId.toString(16)})`);
+
+        // Install inputreport handler
+        device.addEventListener('inputreport', (event) => {
+          // event.reportId, event.data (DataView)
+          const dv = event.data;
+          const bytes = new Uint8Array(dv.buffer);
+          // log header byte + entire array
+          const head = bytes[0] !== undefined ? bytes[0] : '(no head)';
+          // Dump newest
+          if (dumping) {
+            prependLog(`[reportId=${event.reportId}] head=0x${head.toString(16)} data=${Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+          }
+
+          // Many Joy‑Con IMU reports have 0x30 as the first payload byte (bytes[0] == 0x30)
+          // main.rb checked data[0] == 0x30 and then used data[17], data[18] for Z
+          try {
+            if (bytes.length > 18 && bytes[0] === 0x30) {
+              // Try to parse based on the Ruby code: Z from bytes[17..18] little-endian
+              const zl = bytes[17];
+              const zh = bytes[18];
+              let az_raw = (zh << 8) | zl;
+              if (az_raw > 32767) az_raw -= 65536;
+              const az = az_raw / 4000.0; // same divisor used in Ruby example
+              accelZEl.textContent = az.toFixed(3);
+
+              // Try parse X/Y as well by inspecting likely offsets (may require adjustment)
+              if (bytes.length > 14) {
+                // guess: X low @13, high @14 ; Y low @15, high @16 ; Z low @17, high @18
+                function getSigned16(lowIndex, highIndex) {
+                  if (lowIndex < 0 || highIndex >= bytes.length) return null;
+                  let raw = (bytes[highIndex] << 8) | bytes[lowIndex];
+                  if (raw > 32767) raw -= 65536;
+                  return raw;
+                }
+                const xr = getSigned16(13,14);
+                const yr = getSigned16(15,16);
+                const zr = getSigned16(17,18);
+                if (xr !== null) accelXEl.textContent = (xr/4000).toFixed(3);
+                if (yr !== null) accelYEl.textContent = (yr/4000).toFixed(3);
+                if (zr !== null) accelZEl.textContent = (zr/4000).toFixed(3);
+              }
+            }
+          } catch (e) {
+            console.warn('parse error', e);
+          }
+        });
+
+        // Send initialization sequences (may enable IMU and set input report mode)
+        // Note: exact bytes may need to be adjusted for your Joy‑Con / firmware
+        for (const seq of initSeqs) {
+          await sendOutputWithReportId(seq);
+          // small delay between writes
+          await new Promise(res => setTimeout(res, 50));
+        }
+
+        prependLog("初期化シーケンス送信完了。コントローラを動かしてレポートを確認してください。\n");
+
+      } catch (err) {
+        console.error(err);
+        prependLog("接続エラー: " + err);
+      }
+    });
+
+    dumpBtn.addEventListener('click', () => {
+      dumping = !dumping;
+      dumpBtn.textContent = dumping ? "Stop Raw Dump" : "Start Raw Dump";
+      prependLog("dumping = " + dumping);
+    });
+
+    // small helper: detect offsets by printing a few frames (user moves controller)
+    // You may want to move the Joy‑Con and watch which bytes change consistently, then
+    // adapt the `getSigned16` indices above accordingly.
+  })();
+  </script>
+</body>
+</html>
