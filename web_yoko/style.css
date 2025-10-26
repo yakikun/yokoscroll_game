@@ -1,0 +1,13 @@
+/* Basic styles for the game canvas and HUD */
+body { margin: 0; padding: 0; }
+/* Canvas is positioned absolutely; keep it behind UI by placing it behind the page with a negative z-index */
+#gameCanvas { background: #0b1220; display: block; position: absolute; z-index: -1; pointer-events: none; }
+/* Ensure UI panels and log are above the canvas */
+.panel { position: fixed; top: 20px; right: 20px; z-index: 2000; background: rgba(0,0,0,0.6); padding: 8px; border-radius: 6px; }
+/* tuning panel placed top-left */
+#tuningPanel { position: fixed; top: 20px; left: 20px; z-index: 2000; background: rgba(0,0,0,0.6); padding: 8px; border-radius: 6px; color:#eee; font-size:13px; }
+#tuningPanel input[type=range] { width: 180px; }
+#tuningPanel h3 { color:#fff; margin:0 0 6px 0; }
+/* place log in bottom-left above canvas (hidden by default -- kept for debug writes) */
+#log { position: fixed; bottom: 20px; left: 20px; z-index: 2000; background: rgba(0,0,0,0.85); padding: 8px; max-height: 240px; overflow: auto; display: none; }
+.hud { position: fixed; left: 12px; top: 12px; color: #fff; font-family: system-ui, 'Noto Sans JP', sans-serif; z-index: 2000; }

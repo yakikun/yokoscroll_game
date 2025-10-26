@@ -1,11 +1,59 @@
-<!-- Updated inputreport parsing -->
-<script>
-// Assuming the payload is received as an 'event'
-if (event.reportId === 0x30) {
-    // Parse X, Y, Z values from the payload
-    const x = event.payload[13] / 4000;
-    const y = event.payload[14] / 4000;
-    const z = event.payload[15] / 4000;
-    // Use x, y, z as needed
-}
-</script>
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Joy‑Con WebHID IMU Demo</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; padding: 20px; background:#111; color:#eee; }
+    button { font-size: 16px; padding: 8px 12px; margin-right:8px; }
+    pre { background:#000; padding:10px; color:#0f0; max-height:300px; overflow:auto; }
+    .value { font-size: 18px; margin-top:10px; }
+    .panel { display:flex; gap:20px; align-items:center; margin-top:10px; }
+    .col { min-width:160px; }
+  </style>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <h1>Joy‑Con WebHID IMU Demo</h1>
+  <p>※ HTTPS または localhost 上で実行してください。Chromium 系推奨（Chrome / Edge）。</p>
+
+
+
+  <div class="panel">
+    <div>
+      <button id="connectBtn">Connect Joy‑Con</button>
+      <button id="dumpBtn">Start Raw Dump</button>
+      <button id="clearLogBtn">Clear Log</button>
+    </div>
+    <div class="col">
+      <div class="value">X accel: <span id="accelX">—</span> G</div>
+      <div class="value">Y accel: <span id="accelY">—</span> G</div>
+      <div class="value">Z accel: <span id="accelZ">—</span> G</div>
+    </div>
+  </div>
+
+  <!-- Tuning panel: real-time sliders to adjust detection parameters -->
+  <div id="tuningPanel">
+    <h3 style="margin:0 0 6px 0; font-size:14px">Tuning</h3>
+    <div>LP_ALPHA: <input id="lpAlpha" type="range" min="0.01" max="0.6" step="0.01" value="0.22"> <span id="lpAlphaVal">0.22</span></div>
+    <div>JUMP_THRESHOLD: <input id="jumpThreshold" type="range" min="0.2" max="3" step="0.05" value="0.9"> <span id="jumpThresholdVal">0.9</span></div>
+    <div>JUMP_ABS_THRESHOLD: <input id="jumpAbsThreshold" type="range" min="0.2" max="3" step="0.05" value="0.9"> <span id="jumpAbsThresholdVal">0.9</span></div>
+    <div>Cooldown (frames): <input id="jumpCooldown" type="range" min="10" max="180" step="1" value="60"> <span id="jumpCooldownVal">60</span></div>
+    <div>Z-immediate: <input id="rawZEnable" type="checkbox"> Enable</div>
+    <div style="margin-top:6px;"><button id="recalBtn">Recalibrate</button> <button id="resetBtn">Reset Defaults</button></div>
+    <div style="margin-top:6px;"><button id="autoTuneBtn">Auto-Tune (5 jumps)</button> <span id="autoTuneStatus" style="margin-left:8px;color:#9f9">idle</span></div>
+  </div>
+
+
+  <pre id="log">-- logs --</pre>
+
+    <!-- ゲーム表示用キャンバス -->
+  <canvas id="gameCanvas" width="800" height="600" style="display:block; margin:16px 0; border:1px solid #444;"></canvas>
+
+  <script src="./joycon.js"></script>
+
+  <!-- ゲームスクリプト -->
+  <script src="./game.js"></script>
+</body>
+</html>
