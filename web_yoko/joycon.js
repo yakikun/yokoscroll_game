@@ -9,6 +9,9 @@
 
   let device = null;
   let dumping = false;
+  // throttle timestamps
+  let _lastAccUpdateTime = 0; // ms
+  const ACC_UPDATE_MS = 33; // ~30Hz updates for accel DOM
 
   // Force using accelerometer data only (true = ignore gyro channels)
   // 加速度センサーのみを使うよう強制するフラグ（true の場合、ジャイロは無視します）
@@ -21,7 +24,25 @@
   ];
 
   function prependLog(text) {
-    logEl.textContent = text + "\n" + logEl.textContent;
+    // Rate-limited DOM log updates to avoid thrashing the UI when reports are frequent.
+    try {
+      const now = performance.now();
+      if (!window._joycon_logState) window._joycon_logState = { buf: [], last: 0 };
+      const s = window._joycon_logState;
+      s.buf.push(text);
+      // flush at most every 100ms
+      const LOG_UPDATE_MS = 100;
+      if (now - s.last > LOG_UPDATE_MS) {
+        // prepend buffered lines (most recent first)
+        const toPrepend = s.buf.reverse().join('\n');
+        logEl.textContent = toPrepend + "\n" + logEl.textContent;
+        s.buf.length = 0;
+        s.last = now;
+      }
+    } catch (e) {
+      // fallback
+      try { logEl.textContent = text + "\n" + logEl.textContent; } catch(e){}
+    }
   }
   clearLogBtn.addEventListener('click', () => { logEl.textContent = "-- logs --"; });
 
@@ -53,7 +74,14 @@
   let JUMP_THRESHOLD = 0.9; // G 単位の差分閾値（調整済み）
   let JUMP_ABS_THRESHOLD = 0.9; // zBaseline からの絶対差による閾値
   let jumpCooldown = 0;
-  let JUMP_COOLDOWN_FRAMES = 60; // クールダウンを長めにして連続反応をより強く抑制
+  // default cooldown: 30 frames ≈ 0.5s at 60fps
+  let JUMP_COOLDOWN_FRAMES = 30; // frames
+  let JUMP_COOLDOWN_MS = Math.round(JUMP_COOLDOWN_FRAMES * (1000/60)); // milliseconds cooldown
+  let lastJumpTime = 0;
+
+  function canTriggerJump() {
+    return (Date.now() - lastJumpTime) >= JUMP_COOLDOWN_MS;
+  }
   // Immediate Z-axis spike trigger (lower-latency fallback)
   const Z_AXIS_USE_RAW = false; // false = use scaled g units (zG), true = use raw 16-bit (zr_raw)
   let RAW_Z_TRIGGER_ENABLE = false; // Disable immediate Z-axis trigger
@@ -62,13 +90,18 @@
   let Z_DELTA_IMMEDIATE = 1.6; // g change between frames considered an immediate spike（大きめ）
   let prevZFiltered = null;
   // オプション: Y 軸の強い値で直接ジャンプをトリガーする（ユーザー要望）。
-  // デフォルトは OFF にして、誤検出を避けます。必要なら有効化してください。
-  const USE_Y_AXIS_TRIGGER = false;
+  // デフォルトは ON にして、Y 軸のしきい値でジャンプをトリガーする（ユーザー要望: y>7G）
+  let USE_Y_AXIS_TRIGGER = true;
   // Y の解釈: スケール済みの g 単位（yG）か生のセンサー値（yr_raw）かを切り替えます。
-  const Y_AXIS_USE_RAW = false;
-  const Y_G_THRESHOLD = 8; // g 単位の閾値（Y_AXIS_USE_RAW === false の場合）
-  const Y_RAW_THRESHOLD = 8000; // 生の16-bit単位の閾値（Y_AXIS_USE_RAW === true の場合）
+  // We'll use scaled g units (yG) directly for a simple threshold.
+  let Y_AXIS_USE_RAW = false;
+  let Y_G_THRESHOLD = 7.9; // G 単位の閾値をコードで固定
+  let Y_RAW_THRESHOLD = 8000; // 生の16-bit単位の閾値（未使用）
   const Y_JUMP_COOLDOWN_FRAMES = 45;
+  // enable/disable the history/diff-based detection at runtime for debugging
+  let ENABLE_DIFF_DETECTION = true;
+  // persistence key for localStorage
+  const STORAGE_KEY = 'joycon_tuning_v1';
   // 低域通過フィルタ（指数移動平均）: 生の加速度を滑らかにしてノイズを除去します
   let zFiltered = null;
   let LP_ALPHA = 0.22; // smoothing factor (0..1) — 応答を速くして遅延を減らす
@@ -82,8 +115,15 @@
   const calibZSamples = [];
   let yBaseline = null;
   let zBaseline = null;
+  const magHistory = [];
+  const WAVE_MAX = 300;
+  let showMagnitude = true;
   const calibMagSamples = [];
   let magBaseline = null;
+
+  // waveform draw throttling
+  let _lastWaveTime = 0;
+  const WAVE_FPS = 30; // draw waveform at most this many times per second
 
   // Auto-tune (magnitude-based) vars
   let autoTuneActive = false;
@@ -102,12 +142,53 @@
     else zFiltered = zFiltered * (1 - LP_ALPHA) + zG * LP_ALPHA;
     accelHistory.push(zFiltered);
     if (accelHistory.length > MAX_HISTORY) accelHistory.shift();
-    if (jumpCooldown > 0) jumpCooldown--;
+  // frame-based cooldown removed in favor of time-based cooldown (JUMP_COOLDOWN_MS)
     detectJump();
   }
 
+  // --- Persistence: load/save tuning settings to localStorage ---
+  function loadSettings() {
+    try {
+      if (!window.localStorage) return;
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+  // Y_G_THRESHOLD is intentionally fixed in code; do not override from storage
+      if (typeof obj.Y_AXIS_USE_RAW === 'boolean') Y_AXIS_USE_RAW = obj.Y_AXIS_USE_RAW;
+      if (typeof obj.ENABLE_DIFF_DETECTION === 'boolean') ENABLE_DIFF_DETECTION = obj.ENABLE_DIFF_DETECTION;
+      if (typeof obj.JUMP_THRESHOLD === 'number') JUMP_THRESHOLD = obj.JUMP_THRESHOLD;
+      if (typeof obj.JUMP_ABS_THRESHOLD === 'number') JUMP_ABS_THRESHOLD = obj.JUMP_ABS_THRESHOLD;
+      if (typeof obj.JUMP_COOLDOWN_FRAMES === 'number') { JUMP_COOLDOWN_FRAMES = obj.JUMP_COOLDOWN_FRAMES; JUMP_COOLDOWN_MS = Math.round(JUMP_COOLDOWN_FRAMES * (1000/60)); }
+      if (typeof obj.RAW_Z_TRIGGER_ENABLE === 'boolean') RAW_Z_TRIGGER_ENABLE = obj.RAW_Z_TRIGGER_ENABLE;
+      if (typeof obj.LP_ALPHA === 'number') LP_ALPHA = obj.LP_ALPHA;
+      prependLog('Loaded saved tuning settings');
+    } catch (e) {
+      console.warn('loadSettings error', e);
+    }
+  }
+
+  function saveSettings() {
+    try {
+      if (!window.localStorage) return;
+      const obj = {
+        Y_AXIS_USE_RAW,
+        ENABLE_DIFF_DETECTION,
+        JUMP_THRESHOLD,
+        JUMP_ABS_THRESHOLD,
+        JUMP_COOLDOWN_FRAMES,
+        RAW_Z_TRIGGER_ENABLE,
+        LP_ALPHA
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+      prependLog('Saved tuning settings');
+    } catch (e) {
+      console.warn('saveSettings error', e);
+    }
+  }
+
   function detectJump() {
-    if (jumpCooldown > 0) return;
+  if (!canTriggerJump()) return;
+    if (!ENABLE_DIFF_DETECTION) return; // allow disabling diff-based detection for testing
     if (accelHistory.length < 10) return;
     // recent average vs older average の差を用いた簡易ピーク検出
     const recentN = 2;
@@ -125,11 +206,28 @@
     if ((diffUp > JUMP_THRESHOLD && avgRecent > avgOlder) || (absFromBaseline !== null && absFromBaseline > JUMP_ABS_THRESHOLD)) {
       // ジャンプ検出：カスタムイベントで通知
       window.dispatchEvent(new CustomEvent('joycon-jump', { detail: { diff, avgRecent, avgOlder } }));
-      jumpCooldown = JUMP_COOLDOWN_FRAMES;
+  lastJumpTime = Date.now();
       prependLog(`Jump detected! diff=${diff.toFixed(3)} (recent=${avgRecent.toFixed(3)} older=${avgOlder.toFixed(3)})`);
+      // clear recent detection buffers to avoid immediate re-triggers
+      clearDetectionState();
     }
   }
   // --- ジャンプ検出ここまで ---
+
+  // clear detection buffers/state after a confirmed jump to avoid immediate re-triggers
+  function clearDetectionState() {
+    try {
+      accelHistory.length = 0;
+      magHistory.length = 0;
+      autoTuneCapturing = false;
+      autoTuneCurrentMax = 0;
+      prevZFiltered = null;
+      prevYFiltered = null;
+      zFiltered = null;
+    } catch (e) {
+      console.warn('clearDetectionState error', e);
+    }
+  }
 
   // ガード: WebHID API が利用可能かをチェック
   if (!navigator || !navigator.hid) {
@@ -148,6 +246,9 @@
       device = devices[0];
       await device.open();
       prependLog(`Connected: ${device.productName} (vendor=0x${device.vendorId.toString(16)} product=0x${device.productId.toString(16)})`);
+
+  // log current thresholds/settings so user can verify what is active
+  prependLog(`Settings: Y_G_THRESHOLD=${Y_G_THRESHOLD} Y_AXIS_USE_RAW=${Y_AXIS_USE_RAW} ENABLE_DIFF_DETECTION=${ENABLE_DIFF_DETECTION} JUMP_THRESHOLD=${JUMP_THRESHOLD} RAW_Z_TRIGGER_ENABLE=${RAW_Z_TRIGGER_ENABLE}`);
 
   // start auto calibration: collect a short baseline while controller is stationary
   calibrating = true;
@@ -184,15 +285,80 @@
             const yG = yr_raw !== null ? yr_raw / scale : null;
             const zG = zr_raw !== null ? zr_raw / scale : null;
 
-                    if (xG !== null) accelXEl.textContent = xG.toFixed(3);
-                    if (yG !== null) accelYEl.textContent = yG.toFixed(3);
-                    if (zG !== null) accelZEl.textContent = zG.toFixed(3);
+                    // Throttle DOM updates for accelerometer readouts to reduce main-thread work
+                    try {
+                      const nowAcc = performance.now();
+                      if (nowAcc - _lastAccUpdateTime >= ACC_UPDATE_MS) {
+                        if (xG !== null) accelXEl.textContent = xG.toFixed(3);
+                        if (yG !== null) accelYEl.textContent = yG.toFixed(3);
+                        if (zG !== null) accelZEl.textContent = zG.toFixed(3);
+                        _lastAccUpdateTime = nowAcc;
+                      }
+                    } catch(e) { /* ignore DOM errors */ }
 
                     // magnitude (vector length) - useful when controller is tilted
                     const mag = (typeof xG === 'number' && typeof yG === 'number' && typeof zG === 'number') ? Math.sqrt(xG*xG + yG*yG + zG*zG) : null;
+                    // push to waveform history
+                    if (typeof mag === 'number') {
+                      magHistory.push(mag);
+                      if (magHistory.length > WAVE_MAX) magHistory.shift();
+                    }
 
                     // Immediate Z-axis spike detection for lower-latency jumps
-                    if (RAW_Z_TRIGGER_ENABLE && jumpCooldown <= 0 && zG !== null) {
+                    if (RAW_Z_TRIGGER_ENABLE && canTriggerJump() && zG !== null) {
+
+  // --- Waveform drawing ---
+  function drawWaveform() {
+    const canvas = document.getElementById('waveCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    // clear
+    ctx.fillStyle = '#071018';
+    ctx.fillRect(0,0,w,h);
+
+    // determine display range (0..maxG)
+    const maxG = 4.0;
+    // draw baseline if known
+    if (magBaseline !== null) {
+      const yb = h - (magBaseline / maxG) * h;
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0,yb); ctx.lineTo(w,yb); ctx.stroke();
+    }
+
+    // draw threshold lines (absolute thresholds relative to baseline)
+    if (magBaseline !== null) {
+      const tAbs = magBaseline + JUMP_ABS_THRESHOLD;
+      const tDiff = magBaseline + JUMP_THRESHOLD;
+      const yT = h - (tAbs / maxG) * h;
+      const yD = h - (tDiff / maxG) * h;
+      ctx.strokeStyle = 'rgba(255,0,0,0.12)'; ctx.beginPath(); ctx.moveTo(0,yT); ctx.lineTo(w,yT); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,165,0,0.12)'; ctx.beginPath(); ctx.moveTo(0,yD); ctx.lineTo(w,yD); ctx.stroke();
+    }
+
+    // draw history line
+    if (magHistory.length > 1) {
+      ctx.strokeStyle = '#6ff'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i=0;i<magHistory.length;i++) {
+        const gx = i / (WAVE_MAX-1) * w;
+        const gy = h - (Math.min(magHistory[i], maxG) / maxG) * h;
+        if (i===0) ctx.moveTo(gx,gy); else ctx.lineTo(gx,gy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // animation loop for waveform
+  (function waveLoop(){
+    const now = performance.now();
+    if (now - _lastWaveTime >= (1000 / WAVE_FPS)) {
+      drawWaveform();
+      _lastWaveTime = now;
+    }
+    requestAnimationFrame(waveLoop);
+  })();
                       // compute delta from previous filtered Z (or previous raw if null)
                       const zCurr = zG;
                       const zPrev = (prevZFiltered !== null) ? prevZFiltered : zCurr;
@@ -206,8 +372,10 @@
                       }
                       if (dz >= Z_DELTA_IMMEDIATE && magTriggered) {
                         window.dispatchEvent(new CustomEvent('joycon-jump', { detail: { source: 'z-immediate', raw: zr_raw, g: zG } }));
-                        jumpCooldown = JUMP_COOLDOWN_FRAMES;
+                        lastJumpTime = Date.now();
                         prependLog(`Z-immediate trigger dz=${dz.toFixed(3)} g=${zG.toFixed(3)}`);
+                        // clear detection buffers/state so we don't immediately re-trigger
+                        clearDetectionState();
                       }
                       prevZFiltered = zCurr;
                     }
@@ -279,29 +447,22 @@
                     }
 
                     // 設定により、Y 軸の強い値で即時ジャンプをトリガーする
-                      // 設定により、Y 軸の強い値で即時ジャンプをトリガーする（生値 or 平滑化値で判定）
-                    if (USE_Y_AXIS_TRIGGER && jumpCooldown <= 0) {
-                      let triggered = false;
+                    // 生の値 (yr_raw) を使うかスケール済みの g 単位 (yG) を使うかを明確に扱う
+                    if (USE_Y_AXIS_TRIGGER && canTriggerJump()) {
                       if (Y_AXIS_USE_RAW) {
-                        // raw モード: 生データで閾値比較（フィルタは弱め）
-                        if (yr_raw !== null && Math.abs(yr_raw) >= Y_RAW_THRESHOLD) triggered = true;
-                      } else {
-                        // 平滑化値を使う場合: 急激な変化量（dy）と最低振幅の両方を要求して誤検出を防ぐ
-                        if (yFiltered !== null && prevYFiltered !== null) {
-                          // subtract baseline if available
-                          const yCurr = (yBaseline !== null) ? (yFiltered - yBaseline) : yFiltered;
-                          const yPrev = (yBaseline !== null) ? (prevYFiltered - yBaseline) : prevYFiltered;
-                          const dy = Math.abs(yCurr - yPrev);
-                          const mag = Math.abs(yCurr);
-                          const Y_DELTA_THRESHOLD = 1.4; // フレーム間で必要な g 単位の変化量（厳しめ）
-                          const Y_G_MAG_THRESHOLD = 1.2; // 最低振幅（g 単位）（厳しめ）
-                          if (dy >= Y_DELTA_THRESHOLD && mag >= Y_G_MAG_THRESHOLD) triggered = true;
+                        if (typeof yr_raw === 'number' && Math.abs(yr_raw) > Y_RAW_THRESHOLD) {
+                          window.dispatchEvent(new CustomEvent('joycon-jump', { detail: { source: 'y-axis-raw', raw: yr_raw, g: yG } }));
+                          lastJumpTime = Date.now();
+                          prependLog(`Y-axis RAW threshold trigger (raw=${yr_raw} > ${Y_RAW_THRESHOLD})`);
+                          clearDetectionState();
                         }
-                      }
-                      if (triggered) {
-                        window.dispatchEvent(new CustomEvent('joycon-jump', { detail: { source: 'y-axis', raw: yr_raw, g: yG } }));
-                        jumpCooldown = Y_JUMP_COOLDOWN_FRAMES;
-                        prependLog(`Y-axis jump trigger (raw=${yr_raw} g=${yG !== null ? yG.toFixed(3) : 'n/a'})`);
+                      } else {
+                        if (typeof yG === 'number' && yG > Y_G_THRESHOLD) {
+                          window.dispatchEvent(new CustomEvent('joycon-jump', { detail: { source: 'y-axis', raw: yr_raw, g: yG } }));
+                          lastJumpTime = Date.now();
+                          prependLog(`Y-axis threshold trigger (g=${yG.toFixed(3)} > ${Y_G_THRESHOLD})`);
+                          clearDetectionState();
+                        }
                       }
                     }
 
@@ -339,7 +500,7 @@
     if (lp && lpVal) {
       lp.value = LP_ALPHA;
       lpVal.textContent = LP_ALPHA.toFixed(2);
-      lp.addEventListener('input', () => { LP_ALPHA = parseFloat(lp.value); lpVal.textContent = LP_ALPHA.toFixed(2); prependLog(`LP_ALPHA=${LP_ALPHA}`); });
+      lp.addEventListener('input', () => { LP_ALPHA = parseFloat(lp.value); lpVal.textContent = LP_ALPHA.toFixed(2); prependLog(`LP_ALPHA=${LP_ALPHA}`); saveSettings(); });
     }
 
     const jt = document.getElementById('jumpThreshold');
@@ -347,7 +508,7 @@
     if (jt && jtVal) {
       jt.value = JUMP_THRESHOLD;
       jtVal.textContent = JUMP_THRESHOLD.toFixed(2);
-      jt.addEventListener('input', () => { JUMP_THRESHOLD = parseFloat(jt.value); jtVal.textContent = JUMP_THRESHOLD.toFixed(2); prependLog(`JUMP_THRESHOLD=${JUMP_THRESHOLD}`); });
+      jt.addEventListener('input', () => { JUMP_THRESHOLD = parseFloat(jt.value); jtVal.textContent = JUMP_THRESHOLD.toFixed(2); prependLog(`JUMP_THRESHOLD=${JUMP_THRESHOLD}`); saveSettings(); });
     }
 
     const ja = document.getElementById('jumpAbsThreshold');
@@ -355,7 +516,7 @@
     if (ja && jaVal) {
       ja.value = JUMP_ABS_THRESHOLD;
       jaVal.textContent = JUMP_ABS_THRESHOLD.toFixed(2);
-      ja.addEventListener('input', () => { JUMP_ABS_THRESHOLD = parseFloat(ja.value); jaVal.textContent = JUMP_ABS_THRESHOLD.toFixed(2); prependLog(`JUMP_ABS_THRESHOLD=${JUMP_ABS_THRESHOLD}`); });
+      ja.addEventListener('input', () => { JUMP_ABS_THRESHOLD = parseFloat(ja.value); jaVal.textContent = JUMP_ABS_THRESHOLD.toFixed(2); prependLog(`JUMP_ABS_THRESHOLD=${JUMP_ABS_THRESHOLD}`); saveSettings(); });
     }
 
     const jc = document.getElementById('jumpCooldown');
@@ -363,24 +524,73 @@
     if (jc && jcVal) {
       jc.value = JUMP_COOLDOWN_FRAMES;
       jcVal.textContent = JUMP_COOLDOWN_FRAMES;
-      jc.addEventListener('input', () => { JUMP_COOLDOWN_FRAMES = parseInt(jc.value); jcVal.textContent = JUMP_COOLDOWN_FRAMES; prependLog(`JUMP_COOLDOWN_FRAMES=${JUMP_COOLDOWN_FRAMES}`); });
+      jc.addEventListener('input', () => {
+        JUMP_COOLDOWN_FRAMES = parseInt(jc.value);
+        JUMP_COOLDOWN_MS = Math.round(JUMP_COOLDOWN_FRAMES * (1000/60));
+        jcVal.textContent = JUMP_COOLDOWN_FRAMES;
+        prependLog(`JUMP_COOLDOWN_FRAMES=${JUMP_COOLDOWN_FRAMES} (${JUMP_COOLDOWN_MS} ms)`);
+        saveSettings();
+      });
     }
 
     const rz = document.getElementById('rawZEnable');
     if (rz) {
       rz.checked = RAW_Z_TRIGGER_ENABLE;
-      rz.addEventListener('change', () => { RAW_Z_TRIGGER_ENABLE = !!rz.checked; prependLog(`RAW_Z_TRIGGER_ENABLE=${RAW_Z_TRIGGER_ENABLE}`); });
+      rz.addEventListener('change', () => { RAW_Z_TRIGGER_ENABLE = !!rz.checked; prependLog(`RAW_Z_TRIGGER_ENABLE=${RAW_Z_TRIGGER_ENABLE}`); saveSettings(); });
+    }
+
+    // --- Y-axis threshold control (create if not present) ---
+    let yControl = document.getElementById('yThreshold');
+    if (!yControl) {
+      try {
+        const panel = document.getElementById('tuningPanel') || document.body;
+        const wrapper = document.createElement('div');
+        wrapper.style.marginTop = '6px';
+        wrapper.innerHTML = `
+          <label>Y_G_THRESHOLD (fixed): <span id="yThresholdVal">${Y_G_THRESHOLD}</span></label><br>
+          <input id="yThreshold" type="range" min="0" max="16" step="0.1" value="${Y_G_THRESHOLD}" disabled />
+        `;
+        panel.appendChild(wrapper);
+        yControl = document.getElementById('yThreshold');
+      } catch(e){ /* ignore DOM insertion errors */ }
+    }
+    if (yControl) {
+      const yVal = document.getElementById('yThresholdVal');
+      yControl.value = Y_G_THRESHOLD;
+      if (yVal) yVal.textContent = Number(Y_G_THRESHOLD).toFixed(1);
+      // Y_G_THRESHOLD is fixed in code; only display the value and keep the control disabled
+      if (yControl) yControl.disabled = true;
+    }
+
+    // --- Toggle for diff-based detection ---
+    let diffToggle = document.getElementById('diffDetectEnable');
+    if (!diffToggle) {
+      try {
+        const panel2 = document.getElementById('tuningPanel') || document.body;
+        const w2 = document.createElement('div');
+        w2.style.marginTop = '6px';
+        w2.innerHTML = `
+          <label><input id="diffDetectEnable" type="checkbox" ${ENABLE_DIFF_DETECTION? 'checked': ''} /> Enable diff-based detection</label>
+        `;
+        panel2.appendChild(w2);
+        diffToggle = document.getElementById('diffDetectEnable');
+      } catch(e){}
+    }
+    if (diffToggle) {
+      diffToggle.checked = ENABLE_DIFF_DETECTION;
+      diffToggle.addEventListener('change', () => { ENABLE_DIFF_DETECTION = !!diffToggle.checked; prependLog(`ENABLE_DIFF_DETECTION=${ENABLE_DIFF_DETECTION}`); saveSettings(); });
     }
 
     const recal = document.getElementById('recalBtn');
-    if (recal) recal.addEventListener('click', () => { calibrating = true; calibYSamples.length = 0; calibZSamples.length = 0; yBaseline = null; zBaseline = null; prependLog('Manual recalibration started — keep controller still'); });
+  if (recal) recal.addEventListener('click', () => { calibrating = true; calibYSamples.length = 0; calibZSamples.length = 0; yBaseline = null; zBaseline = null; prependLog('Manual recalibration started — keep controller still'); });
 
     const resetBtn = document.getElementById('resetBtn');
     if (resetBtn) resetBtn.addEventListener('click', () => {
       LP_ALPHA = 0.22;
       JUMP_THRESHOLD = 0.9;
       JUMP_ABS_THRESHOLD = 0.9;
-      JUMP_COOLDOWN_FRAMES = 60;
+  JUMP_COOLDOWN_FRAMES = 30;
+  JUMP_COOLDOWN_MS = Math.round(JUMP_COOLDOWN_FRAMES * (1000/60));
       RAW_Z_TRIGGER_ENABLE = false;
       Z_G_IMMEDIATE = 2.8;
       Z_DELTA_IMMEDIATE = 1.6;
@@ -391,6 +601,8 @@
       if (jc && jcVal) { jc.value = JUMP_COOLDOWN_FRAMES; jcVal.textContent = JUMP_COOLDOWN_FRAMES; }
       if (rz) { rz.checked = RAW_Z_TRIGGER_ENABLE; }
       prependLog('Tuning defaults restored');
+      // save defaults to storage
+      saveSettings();
     });
 
     const autoBtn = document.getElementById('autoTuneBtn');
@@ -408,6 +620,9 @@
   }
 
   // initialize tuning UI if present
-  try { setupTuningUI(); } catch (e) { /* ignore if DOM not ready or elements missing */ }
+  try { 
+    loadSettings();
+    setupTuningUI(); 
+  } catch (e) { /* ignore if DOM not ready or elements missing */ }
 
 })();

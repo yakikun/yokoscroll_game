@@ -39,10 +39,13 @@
     <div>LP_ALPHA: <input id="lpAlpha" type="range" min="0.01" max="0.6" step="0.01" value="0.22"> <span id="lpAlphaVal">0.22</span></div>
     <div>JUMP_THRESHOLD: <input id="jumpThreshold" type="range" min="0.2" max="3" step="0.05" value="0.9"> <span id="jumpThresholdVal">0.9</span></div>
     <div>JUMP_ABS_THRESHOLD: <input id="jumpAbsThreshold" type="range" min="0.2" max="3" step="0.05" value="0.9"> <span id="jumpAbsThresholdVal">0.9</span></div>
-    <div>Cooldown (frames): <input id="jumpCooldown" type="range" min="10" max="180" step="1" value="60"> <span id="jumpCooldownVal">60</span></div>
+  <div>Cooldown (frames): <input id="jumpCooldown" type="range" min="10" max="180" step="1" value="30"> <span id="jumpCooldownVal">30</span></div>
     <div>Z-immediate: <input id="rawZEnable" type="checkbox"> Enable</div>
     <div style="margin-top:6px;"><button id="recalBtn">Recalibrate</button> <button id="resetBtn">Reset Defaults</button></div>
-    <div style="margin-top:6px;"><button id="autoTuneBtn">Auto-Tune (5 jumps)</button> <span id="autoTuneStatus" style="margin-left:8px;color:#9f9">idle</span></div>
+    <div style="margin-top:6px; display:flex; align-items:center; gap:8px;"><label><input id="showMag" type="checkbox" checked> Show magnitude</label> <button id="autoTuneBtn">Auto-Tune (5 jumps)</button> <span id="autoTuneStatus" style="margin-left:8px;color:#9f9">idle</span></div>
+    <div style="margin-top:8px;">
+      <canvas id="waveCanvas" width="300" height="80" style="border:1px solid rgba(255,255,255,0.08); background:#071018; display:block"></canvas>
+    </div>
   </div>
 
 
