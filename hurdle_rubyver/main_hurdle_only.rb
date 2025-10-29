@@ -25,6 +25,10 @@ class HurdleOnlyWindow < Gosu::Window
     @gravity = 0.6
     @jump_power = -12.0
     @on_ground = true
+  # ジャンプ数と消費計算
+  @jump_count = 0
+  # 1ジャンプあたりのkcal
+  @kcal_per_jump = 0.1
 
   # Joy-Con 関連（hidaping が利用可能な場合のみ初期化）
   @joycon_handle = nil
@@ -78,8 +82,11 @@ class HurdleOnlyWindow < Gosu::Window
     chosen = font_candidates.find { |p| File.exist?(p) }
     if chosen
       @font = Gosu::Font.new(20, name: chosen)
+      # 大きめのフォントをゲームオーバー表示用に用意
+      @big_font = Gosu::Font.new(48, name: chosen)
     else
       @font = Gosu::Font.new(20)
+      @big_font = Gosu::Font.new(48)
     end
     # 画像読み込み（プレイヤー・ブロック）
     # プレイヤー画像: 優先順に hurdle_run / hurdle_junp (typo 対応) / hurdle_jump / kyara を探す
@@ -199,7 +206,8 @@ class HurdleOnlyWindow < Gosu::Window
 
   def draw
     # 背景
-    Gosu.draw_rect(0, 0, width, height, Gosu::Color::WHITE, 0)
+    # 背景色を #dcdcdc に変更（Gosu::Color.new は 0xAARRGGBB の整数を受け取る）
+    Gosu.draw_rect(0, 0, width, height, Gosu::Color.new(0xFFDCDCDC), 0)
 
     # 地面
     Gosu.draw_rect(0, @ground_y, width, height - @ground_y, Gosu::Color::GREEN, 0)
@@ -252,7 +260,7 @@ class HurdleOnlyWindow < Gosu::Window
           @block_image.draw(h[:x], y_pos, 1, pole_w.to_f / img_w, img_h.to_f / img_h)
           y_pos += img_h
         end
-        # 右ポール
+        # 右ポー
         y_pos = h[:y]
         while y_pos < h[:y] + h[:h]
           @block_image.draw(h[:x] + h[:w] - pole_w, y_pos, 1, pole_w.to_f / img_w, img_h.to_f / img_h)
@@ -275,24 +283,40 @@ class HurdleOnlyWindow < Gosu::Window
       end
     end
 
-    # UI
-    @font.draw_text("スコア: #{@score}", 10, 10, 2, 1, 1, Gosu::Color::YELLOW)
+  # UI
+  # スコアに対するお米換算（3回で4粒のルール）を表示
+  rice_from_score = (@score * 4.0 / 3.0)
+  @font.draw_text("ハードルを飛び越えた数: #{@score}  お米相当: #{'%.1f' % rice_from_score} 粒", 10, 10, 2, 1, 1, Gosu::Color.new(0xff4682b4))
+  # ジャンプ統計: 回数 / kcal / お米相当（3回で4粒換算）
+  kcal = (@jump_count * @kcal_per_jump)
+  rice = (@jump_count * 4.0 / 3.0)
+  sets = @jump_count / 3
+  grains_from_sets = sets * 4
+  remainder = @jump_count % 3
+  @font.draw_text("ジャンプ: #{@jump_count}回  消費: #{'%.1f' % kcal} kcal  お米相当: #{'%.1f' % rice} 粒", 10, 34, 2, 1, 1, Gosu::Color.new(0xff4682b4))
+  @font.draw_text("(#{sets}セット → #{grains_from_sets}粒, 余り: #{remainder}回)", 10, 58, 2, 1, 1, Gosu::Color.new(0xff4682b4))
+  
+  # ゲームオーバー時の最終スコア表示
+  if @game_over
+    # 半透明オーバーレイ
+    overlay = Gosu::Color.new(0x88000000)
+    Gosu.draw_rect(0, 0, width, height, overlay, 10)
 
-    # Joy-Con の選択軸表示と現在値（デバッグ用）
-    if HIDAPING_AVAILABLE
-      axis_val = @current_accel[@accel_axis] || 0.0
-      # 使用軸が固定されている場合はその旨を表示
-      axis_label = @force_accel_axis ? "#{@accel_axis.upcase} (固定)" : @accel_axis.upcase
-      @font.draw_text("Joy axis: #{axis_label}  値: #{axis_val.round(3)}G", 10, 40, 2, 1, 1, Gosu::Color::CYAN)
-      y_offset = 64
-    else
-      @font.draw_text("スペース/上キーでジャンプ", 10, 40, 2, 1, 1, Gosu::Color::WHITE)
-      y_offset = 64
-    end
+    title = "ゲームオーバー"
+    hint = "Rキーでリトライ"
 
-    if @game_over
-      @font.draw_text("GAME OVER - Rでリスタート", width/2 - 140, height/2 - 10, 3, 1, 1, Gosu::Color::RED)
-    end
+    # お米換算（画面上部で使ったルールと同じ: 3回 => 4粒）を大きく表示
+    big_rice_text = "#{'%.1f' % rice_from_score} 粒分のお米を消費しました！"
+
+    tx_title = (width - @big_font.text_width(title)) / 2.0
+    trx = (width - @big_font.text_width(big_rice_text)) / 2.0
+    hx = (width - @font.text_width(hint)) / 2.0
+
+    # タイトルは従来通り（黄色）、お米表示は左上と同じ色にして大きく中央表示
+    @big_font.draw_text(title, tx_title, height / 2 - 80, 11, 1, 1, Gosu::Color::YELLOW)
+    @big_font.draw_text(big_rice_text, trx, height / 2 - 20, 11, 1, 1, Gosu::Color.new(0xff4682b4))
+    @font.draw_text(hint, hx, height / 2 + 40, 11, 1, 1, Gosu::Color::WHITE)
+  end
   end
 
   def button_down(id)
@@ -313,6 +337,7 @@ class HurdleOnlyWindow < Gosu::Window
   def jump
     @player_vel_y = @jump_power
     @on_ground = false
+    @jump_count += 1
   end
 
   def spawn_hurdle
@@ -368,6 +393,7 @@ class HurdleOnlyWindow < Gosu::Window
     @hurdles.clear
     @spawn_counter = 0
     @score = 0
+    @jump_count = 0
     @game_over = false
   end
 
@@ -428,8 +454,8 @@ class HurdleOnlyWindow < Gosu::Window
     # ジャンプ検出
     sel_val = @current_accel[@accel_axis]
     if sel_val && sel_val.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
-      @player_vel_y = @jump_power
-      @on_ground = false
+      # 共通の jump メソッドを使うことでカウント等を統一
+      jump
       @jump_cooldown = 30
       puts "Joy-Con ジャンプ検出(#{@accel_axis.upcase}): #{sel_val.round(3)}G"
     end
