@@ -22,9 +22,9 @@ class HurdleOnlyWindow < Gosu::Window
     @player_h = 48
     @player_y = @ground_y - @player_h
     @player_vel_y = 0.0
-    @gravity = 0.6
-    @jump_power = -12.0
-    @on_ground = true
+  @gravity = 0.6
+  @jump_power = -12.0
+  @on_ground = true
   # ジャンプ数と消費計算
   @jump_count = 0
   # 1ジャンプあたりのkcal
@@ -52,6 +52,17 @@ class HurdleOnlyWindow < Gosu::Window
     }
 
     @current_accel = { x: 0.0, y: 0.0, z: 0.0 }
+
+  # 可変ジャンプ用パラメータ（加速度に応じてジャンプ力を変える）
+  # 小さい加速度での最低ジャンプ力（負の値）
+  @min_jump_power = -12
+  # 最大（強い振りでの）ジャンプ力（負の値。より負のほど高く跳ぶ）
+  @max_jump_power = -20.0
+  # ジャンプ力を比例計算する際の最大 G 値（閾値以上でこの値を上限とする）
+  @max_detect_g = 8.0
+  # 最終的に使ったジャンプ力をデバッグ用に保持
+  @last_jump_power = @jump_power
+  @last_jump_category = "normal"
 
     initialize_joycon if HIDAPING_AVAILABLE
 
@@ -293,9 +304,11 @@ class HurdleOnlyWindow < Gosu::Window
   sets = @jump_count / 3
   grains_from_sets = sets * 4
   remainder = @jump_count % 3
-  @font.draw_text("ジャンプ: #{@jump_count}回  消費: #{'%.1f' % kcal} kcal  お米相当: #{'%.1f' % rice} 粒", 10, 34, 2, 1, 1, Gosu::Color.new(0xff4682b4))
-  @font.draw_text("(#{sets}セット → #{grains_from_sets}粒, 余り: #{remainder}回)", 10, 58, 2, 1, 1, Gosu::Color.new(0xff4682b4))
-  
+  @font.draw_text("ジャンプ: #{@jump_count}回  消費: #{'%.1f' % kcal} kcal  お米相当: #{'%.1f' % rice} 粒", 10, 34, 2, 1, 1, Gosu::Color.new(0xff4682b4))  
+  # デバッグ: 選択軸の現在値と最後に使ったジャンプカテゴリ/力
+  sel_axis_val = @current_accel[@accel_axis] || 0.0
+  debug_text = "#{@accel_axis.upcase}: #{'%.3f' % sel_axis_val} G  last: #{@last_jump_category} (#{'%.2f' % @last_jump_power})"
+  @font.draw_text(debug_text, 10, 82, 2, 1, 1, Gosu::Color.new(0xff666666))
   # ゲームオーバー時の最終スコア表示
   if @game_over
     # 半透明オーバーレイ
@@ -334,8 +347,29 @@ class HurdleOnlyWindow < Gosu::Window
     end
   end
 
-  def jump
-    @player_vel_y = @jump_power
+  def jump(accel_val = nil)
+    # accel_val が渡されていれば、丸めた G 値で 3 段階ジャンプを決定
+    if accel_val && accel_val.is_a?(Numeric)
+      g = accel_val.abs
+      g_rounded = g.round
+      case
+      when g_rounded <= 2
+        power = @min_jump_power
+        @last_jump_category = "small"
+      when g_rounded == 2.5
+        power = @jump_power
+        @last_jump_category = "normal"
+      else
+        power = @max_jump_power
+        @last_jump_category = "high"
+      end
+      @player_vel_y = power
+      @last_jump_power = power
+    else
+      @player_vel_y = @jump_power
+      @last_jump_power = @jump_power
+      @last_jump_category = "normal"
+    end
     @on_ground = false
     @jump_count += 1
   end
@@ -454,10 +488,10 @@ class HurdleOnlyWindow < Gosu::Window
     # ジャンプ検出
     sel_val = @current_accel[@accel_axis]
     if sel_val && sel_val.abs > @jump_threshold && @on_ground && @jump_cooldown == 0
-      # 共通の jump メソッドを使うことでカウント等を統一
-      jump
+      # 加速度値を渡してジャンプ力を可変にする（2->小, 3->普通, 4以上->高）
+      jump(sel_val)
       @jump_cooldown = 30
-      puts "Joy-Con ジャンプ検出(#{@accel_axis.upcase}): #{sel_val.round(3)}G"
+      puts "Joy-Con ジャンプ検出(#{@accel_axis.upcase}): #{sel_val.round(3)}G  category=#{@last_jump_category} power=#{@last_jump_power}"
     end
   end
 end
